@@ -1,0 +1,25 @@
+config:
+  # 1. Privilegios: Necesario para cargar programas eBPF en el kernel
+  security.privileged: "true"
+
+  # 2. Raw settings: Esta es la forma correcta de pasar capacidades en versiones nuevas
+  raw.lxc: |-
+    lxc.apparmor.profile = unconfined
+    lxc.cgroup.devices.allow = a
+    lxc.cap.drop =
+    lxc.mount.entry = /sys/fs/bpf /sys/fs/bpf none bind,create=dir 0 0
+
+description: Perfil para investigación de Blockchain con eBPF
+devices:
+  root:
+    path: /
+    pool: default
+    type: disk
+
+  # 3. Passthrough de la tarjeta de red física
+  eth0:
+    name: eth0
+    nictype: physical
+    parent: enp0s31f6 # <--- CAMBIA ESTO por el nombre de tu NIC real
+    type: nic
+name: ebpf-blockchain
