@@ -3,7 +3,7 @@
 **Estado:** DRAFT (Borrador de Investigación)
 **Versión:** 1.3.0
 **Fecha:** 27 de febrero de 2026
-**Autor:** [Tu Nombre o Proyecto]
+**Autor:** Maximiliano Paredes
 **Categoría:** Infraestructura de Sistemas Distribuidos / Seguridad de Red
 
 ---
