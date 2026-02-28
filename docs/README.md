@@ -10,11 +10,13 @@ lxc launch ubuntu:22.04 blockchain-node -p ebpf-blockchain
 
 
 # Detener, renombrar y reiniciar para aplicar cambios de configuración
+
 lxc stop blockchain-node
 lxc rename blockchain-node ebpf-blockchain
 lxc start ebpf-blockchain
 
 # Montar el directorio del host dentro del contenedor para desarrollo persistente
+
 lxc config device add ebpf-blockchain project disk \
     source=/home/maxi/Documentos/source/codecrypto/rust/ebpf-blockchain \
     path=/root/ebpf-blockchain
@@ -26,13 +28,16 @@ lxc exec ebpf-blockchain -- bash -c "apt update && apt install -y \
 
 
 # Instalar Rust (Stable)
+
 lxc exec ebpf-blockchain -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
 
 # Instalar Nightly (necesario para compilación de core en BPF) y componentes
+
 lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && rustup toolchain install nightly"
 lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && rustup component add rust-src --toolchain nightly"
 
 # Instalar Linker de BPF y generador de proyectos
+
 lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && cargo install bpf-linker"
 lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && cargo install cargo-generate"
 
@@ -43,6 +48,7 @@ lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && cd /root/ebpf-b
     --name ebpf-node -d program_type=xdp -d default_iface=eth0 --silent"
 
 # Compilar el proyecto completo (User Space + eBPF Kernel Space)
+
 lxc exec ebpf-blockchain -- bash -c "source \$HOME/.cargo/env && cd /root/ebpf-blockchain/ebpf-node && cargo build"
 
 
