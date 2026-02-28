@@ -1,0 +1,18 @@
+[package]
+name = "ebpf-node-ebpf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+ebpf-node-common = { path = "../ebpf-node-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+network-types = { workspace = true }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "ebpf-node"
+path = "src/main.rs"

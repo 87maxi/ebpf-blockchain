@@ -5,16 +5,17 @@ El proyecto se basa en la interacción entre el espacio de usuario (donde vive l
 
 ---
 
-## 2. Fase de Configuración del Entorno (Lab)
+## 2. Entorno (Lab)
 
-Antes de programar, debemos preparar el entorno de virtualización en Manjaro para que LXC tenga acceso directo al hardware.
+Antes de programar, comprueba la integridad del entorno lxc que se utilizará para el desarrollo.
 
 ### Tareas:
-1.  **Instalar LXC/LXD:** Utilizar `pacman` para instalar los paquetes necesarios.
+1.  **Verificar LXC/LXD:** comprobar que el contenedor ebpf-blockchain este en ejecucion
 2.  **Configurar Red Física (Passthrough):**
-    * Editar el perfil LXC para usar `nictype: physical`.
+    * verifica el estado de la interfaz de red del contenedor
     * Identificar el nombre de la interfaz física del host (ej: `enp3s0`).
 3.  **Montar Sistema BPF:** Asegurar que `/sys/fs/bpf` sea accesible dentro del contenedor para compartir mapas.
+4. **dependencias instaladas** verifica que todas las dependencias necesarias esten instaladas y configuradas correctamente
 
 ---
 

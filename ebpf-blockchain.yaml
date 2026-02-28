@@ -20,6 +20,6 @@ devices:
   eth0:
     name: eth0
     nictype: physical
-    parent: enp0s31f6 # <--- CAMBIA ESTO por el nombre de tu NIC real
+    parent: enp5s0 # <--- CAMBIA ESTO por el nombre de tu NIC real
     type: nic
 name: ebpf-blockchain
