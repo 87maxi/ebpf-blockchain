@@ -1,9 +1,13 @@
+use std::{net::Ipv4Addr, time::Duration};
+
 use anyhow::Context as _;
+use axum::{Router, routing::get};
 use aya::{
     maps::{HashMap, LpmTrie, lpm_trie::Key},
     programs::{KProbe, Xdp, XdpFlags},
 };
 use clap::Parser;
+use lazy_static::lazy_static;
 use libp2p::{
     Multiaddr,
     futures::StreamExt,
@@ -12,9 +16,40 @@ use libp2p::{
     tcp, yamux,
 };
 use log::{debug, info, warn};
-use std::net::Ipv4Addr;
-use std::time::Duration;
+use prometheus::{
+    Encoder, IntCounterVec, IntGaugeVec, TextEncoder, register_int_counter_vec,
+    register_int_gauge_vec,
+};
 use tokio::{signal, time};
+
+lazy_static! {
+    static ref LATENCY_BUCKETS: IntGaugeVec = register_int_gauge_vec!(
+        "ebpf_node_latency_buckets",
+        "Current values of latency buckets",
+        &["bucket"]
+    )
+    .unwrap();
+    static ref MESSAGES_RECEIVED: IntCounterVec = register_int_counter_vec!(
+        "ebpf_node_messages_received_total",
+        "Total number of gossiped messages received",
+        &["type"]
+    )
+    .unwrap();
+    static ref PEERS_CONNECTED: IntGaugeVec = register_int_gauge_vec!(
+        "ebpf_node_peers_connected",
+        "Number of connected peers",
+        &["status"]
+    )
+    .unwrap();
+}
+
+async fn metrics_handler() -> String {
+    let encoder = TextEncoder::new();
+    let mut buffer = vec![];
+    let metric_families = prometheus::gather();
+    encoder.encode(&metric_families, &mut buffer).unwrap();
+    String::from_utf8(buffer).unwrap()
+}
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -122,6 +157,17 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Local Peer ID: {}", swarm.local_peer_id());
 
+    // Spawn Prometheus metrics server
+    tokio::spawn(async move {
+        let app = Router::new().route("/metrics", get(metrics_handler));
+        if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:9090").await {
+            info!("Prometheus metrics server listening on 0.0.0.0:9090/metrics");
+            let _ = axum::serve(listener, app).await;
+        } else {
+            warn!("Failed to bind metrics server to 0.0.0.0:9090");
+        }
+    });
+
     let mut stats_interval = time::interval(Duration::from_secs(10));
 
     // Main event loop
@@ -133,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("--- Latency Histogram (nanoseconds, power of 2 buckets) ---");
                     for i in 0..64 {
                         if let Ok(count) = latency_stats.get(&i, 0) {
+                            LATENCY_BUCKETS.with_label_values(&[&i.to_string()]).set(count as i64);
                             if count > 0 {
                                 println!("Bucket 2^{}: {} packets", i, count);
                             }
@@ -146,6 +193,7 @@ async fn main() -> anyhow::Result<()> {
                     message_id,
                     message,
                 })) => {
+                    MESSAGES_RECEIVED.with_label_values(&["gossip"]).inc();
                     info!("Got message: '{}' with id: {} from peer: {}",
                         String::from_utf8_lossy(&message.data), message_id, propagation_source);
 
@@ -169,6 +217,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Listening on {:?}", address);
+                }
+                SwarmEvent::ConnectionEstablished { .. } => {
+                    PEERS_CONNECTED.with_label_values(&["connected"]).inc();
+                }
+                SwarmEvent::ConnectionClosed { .. } => {
+                    PEERS_CONNECTED.with_label_values(&["connected"]).dec();
                 }
                 SwarmEvent::IncomingConnection { send_back_addr, .. } => {
                     if let Some(ip) = get_ip_from_multiaddr(&send_back_addr) {

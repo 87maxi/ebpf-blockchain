@@ -31,6 +31,9 @@ log = { version = "0.4.22", default-features = false }
 network-types = { version = "0.0.7", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
+axum = { version = "0.7.5" }
+prometheus = { version = "0.13.3" }
+lazy_static = { version = "1.4.0" }
 
 [profile.release.package.ebpf-node-ebpf]
 debug = 2

@@ -23,6 +23,9 @@ tokio = { workspace = true, features = [
 ] }
 clap = { workspace = true, features = ["derive"] }
 libp2p = { workspace = true }
+axum = { workspace = true }
+prometheus = { workspace = true }
+lazy_static = { workspace = true }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

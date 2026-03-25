@@ -110,6 +110,7 @@ Aplicación Rust asíncrona (Tokio) que orquesta el sistema.
 
 *   **Loop de Observabilidad:**
     *   Tarea en segundo plano que lee periódicamente el mapa `LATENCY_STATS`.
+    *   Expone métricas (latencia, mensajes recibidos, peers conectados) a través de un servidor HTTP (`0.0.0.0:9090/metrics`) para ser consumidas por Prometheus.
     *   Imprime en consola un histograma de la latencia de red observada en tiempo real.
 
 ---
@@ -120,34 +121,39 @@ Aplicación Rust asíncrona (Tokio) que orquesta el sistema.
 *   Linux Kernel 5.10+ (con soporte BTF).
 *   LXD instalado.
 
-### Configuración del Contenedor (Setup)
-El siguiente bloque de comandos configura un contenedor privilegiado con acceso a BPF y dependencias de Rust Nightly.
+### Configuración Automatizada de la Instancia LXD (Setup)
+
+El proyecto incluye un archivo `ebpf-blockchain.yaml` en la raíz del repositorio que define toda la infraestructura como código usando Cloud-Init. Este manifiesto configura recursos (RAM, CPU), privilegios BPF en el kernel, instala de forma desatendida Rust Nightly, `bpf-linker`, `cargo-watch` y mapea automáticamente el directorio de tu proyecto.
+
+Para aprovisionar el entorno completo en un solo paso:
 
 ```bash
-# 1. Crear contenedor con perfil adecuado
-lxc launch ubuntu:22.04 ebpf-blockchain --profile ebpf-blockchain
-lxc config device add ebpf-blockchain project disk source=$(pwd) path=/root/ebpf-blockchain
+# 1. Crear e iniciar la instancia LXD inyectando el manifiesto YAML
+# (Asegúrate de estar en el directorio raíz donde reside ebpf-blockchain.yaml)
+lxc launch ubuntu:22.04 ebpf-blockchain < ebpf-blockchain.yaml
 
-# 2. Acceder y preparar dependencias
+# 2. Esperar a que cloud-init finalice la descarga e instalación de Rust y herramientas eBPF.
+# Puedes monitorear el progreso de la instalación interactiva con:
+lxc exec ebpf-blockchain -- tail -f /var/log/cloud-init-output.log
+
+# 3. Acceder al nodo (el usuario root ya tiene listo el PATH de Cargo)
 lxc exec ebpf-blockchain -- bash
-# (Dentro del contenedor)
-apt update && apt install -y build-essential clang llvm libelf-dev libbpf-dev curl git
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source $HOME/.cargo/env
-rustup toolchain install nightly
-rustup component add rust-src --toolchain nightly
-cargo install bpf-linker
 ```
 
-### Compilación y Ejecución
+### Live Coding y Ejecución Reactiva (Hot-Reload)
+
+Gracias a la declaración `workspace` dentro de la sección de `devices` en el archivo YAML, tu directorio local del Host se ha montado nativamente en `/root/ebpf-blockchain` dentro de la máquina. **Esto significa "cero copias":** no necesitas regenerar la imagen de LXC, ni copiar archivos manuales. Cualquier cambio que guardes en tu IDE (VSCode, etc.) se refleja al instante.
+
+Para hacer que el nodo se recompile y reinicie automáticamente ante cualquier modificación del código fuente (tanto en el espacio de usuario como en los programas eBPF del kernel), utiliza `cargo-watch`:
+
 ```bash
-# Compilar todo el workspace
+# Acceder a la ruta montada dentro del contenedor
 cd /root/ebpf-blockchain/ebpf-node
-cargo build
 
-# Ejecutar el nodo (requiere privilegios de root/CAP_BPF)
-RUST_LOG=info ./target/debug/ebpf-node --iface eth0
+# Ejecutar el nodo en modo reactivo
+RUST_LOG=info cargo watch -c -w ebpf-node/src/ -w ebpf-node-ebpf/src/ -x 'run --bin ebpf-node -- --iface eth0'
 ```
+* **Nota:** Al estar como usuario `root` en el contenedor, `cargo run` tiene automáticamente los permisos (CAP_BPF) necesarios para inyectar eBPF en el kernel.
 
 ---
 
@@ -211,6 +217,56 @@ Herramientas útiles para inspeccionar el estado del sistema eBPF en tiempo real
 | `bpftool map dump name NODES_BLACKLIST` | Muestra las IPs actualmente bloqueadas. |
 | `bpftool map dump name LATENCY_STATS` | Muestra el histograma de latencia crudo. |
 | `ip link show eth0` | Muestra si hay un programa XDP adjunto (`xdp` o `xdp generic`). |
+
+---
+
+## 6. Observabilidad: Integración con Prometheus y Grafana
+
+El nodo expone métricas en formato Prometheus en el puerto `9090` bajo la ruta `/metrics` usando un servidor HTTP embebido (Axum). 
+
+### Métricas Expuestas
+- `ebpf_node_latency_buckets`: Histograma de latencias de red recolectado desde el Kernel vía eBPF (Kprobes).
+- `ebpf_node_messages_received_total`: Contador de mensajes Gossipsub recibidos.
+- `ebpf_node_peers_connected`: Número de pares P2P actualmente conectados.
+
+### Despliegue de Observabilidad con Docker Compose
+
+En la raíz del proyecto encontrarás los archivos `docker-compose.yml` y `prometheus.yml` preconfigurados. La instancia LXD está configurada para usar una NIC física (`enp5s0`), por lo que recibirá una IP directamente de tu router local (ej. `192.168.1.x`).
+
+1. Averigua la IP de tu instancia LXD con `lxc list` y edita el archivo `prometheus.yml` para que apunte a ella:
+
+```yaml
+scrape_configs:
+  - job_name: "ebpf_node_1"
+    static_configs:
+      - targets: ["192.168.1.123:9090"] # Reemplazar por la IP que `lxc list` te muestre
+```
+
+2. Levanta los servicios:
+```bash
+docker-compose up -d
+```
+
+### Configuración en Grafana
+
+1. Acceder a Grafana en `http://localhost:3000` en tu Host (usuario/contraseña por defecto: `admin`/`admin`).
+2. Ir a **Connections > Data Sources** y agregar **Prometheus**.
+3. En la URL del servidor, ingresar `http://localhost:9090` (ya que ambos corren en `network_mode: host` en tu máquina).
+4. Guardar y probar (Save & Test).
+5. Crear un nuevo Dashboard (Dashboards > New Dashboard) y agregar paneles específicos usando PromQL:
+
+   *   **Histograma de Latencia (Bar chart):**
+       *   **Consulta:** `ebpf_node_latency_buckets`
+       *   **Explicación:** Dado que eBPF guarda los datos en buckets de base 2, el label `bucket` contiene el exponente (ej. `bucket="10"` significa 2^10 nanosegundos).
+       *   **Configuración Grafana:** Usa un gráfico de **Bar chart**. En la pestaña *Transform Data* de Grafana, puedes ordenar las series por nombre para que el eje X respete la progresión logarítmica de la latencia medida en el Kernel.
+
+   *   **Peers Conectados (Stat / Gauge):**
+       *   **Consulta:** `ebpf_node_peers_connected{status="connected"}`
+       *   **Configuración Grafana:** Panel tipo **Stat**. Mostrará el número actual de conexiones activas en el enjambre P2P.
+
+   *   **Tasa de Mensajes P2P (Time series):**
+       *   **Consulta:** `rate(ebpf_node_messages_received_total[1m])`
+       *   **Configuración Grafana:** Panel tipo **Time series**. Mostrará la cantidad de mensajes Gossipsub procesados por segundo, ideal para identificar picos de actividad o ataques de inundación en la red.
 
 ---
 
