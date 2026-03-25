@@ -47,6 +47,20 @@ for i in $(seq 1 $CANTIDAD); do
     lxc exec "$BASE_NAME-$i" -- bash -c "echo 'nameserver 8.8.8.8' > /etc/resolv.conf" 2>/dev/null || true
     
     echo -e "${GREEN}  Nodo $BASE_NAME-$i listo${NC}"
+    
+    # Copiar script de instalación de dependencias
+    echo -e "${BLUE}  Copiando script de instalación de dependencias...${NC}"
+    lxc exec "$BASE_NAME-$i" -- mkdir -p /opt 2>/dev/null || true
+    lxc file push "$SCRIPT_DIR/install-deps.sh" "$BASE_NAME-$i/opt/install-deps.sh" --mode=755 2>/dev/null || true
+    
+    # Ejecutar instalación de dependencias
+    echo -e "${BLUE}  Instalando dependencias en $BASE_NAME-$i (esto puede tomar varios minutos)...${NC}"
+    lxc exec "$BASE_NAME-$i" -- bash /opt/install-deps.sh || {
+        echo -e "${YELLOW}  Advertencia: La instalación de dependencias falló${NC}"
+        echo -e "${YELLOW}  Puedes ejecutar manualmente: lxc exec $BASE_NAME-$i -- bash /opt/install-deps.sh${NC}"
+    }
+    
+    echo -e "${GREEN}  Dependencias instaladas en $BASE_NAME-$i${NC}"
 done
 
 echo ""

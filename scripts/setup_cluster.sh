@@ -67,12 +67,18 @@ lxc exec ebpf-blockchain-2 -- bash -c "echo 'nameserver 8.8.8.8' > /etc/resolv.c
 
 # Instalar dependencias si no están
 echo "Verificando dependencias en ebpf-blockchain-2..."
-if ! lxc exec ebpf-blockchain-2 -- which rustc &>/dev/null; then
-    echo "Instalando dependencias..."
-    lxc exec ebpf-blockchain-2 -- bash -c "apt update && apt install -y build-essential clang llvm libelf-dev libbpf-dev curl git"
-    lxc exec ebpf-blockchain-2 -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-    lxc exec ebpf-blockchain-2 -- bash -c "/root/.cargo/bin/rustup toolchain install nightly --component rust-src"
-    lxc exec ebpf-blockchain-2 -- bash -c "/root/.cargo/bin/cargo install bpf-linker cargo-watch"
+if ! lxc exec ebpf-blockchain-2 -- test -f "$HOME/.deps-installed" 2>/dev/null; then
+    echo "Copiando script de instalación..."
+    lxc exec ebpf-blockchain-2 -- mkdir -p /opt 2>/dev/null || true
+    lxc file push "$SCRIPT_DIR/install-deps.sh" ebpf-blockchain-2/opt/install-deps.sh --mode=755 2>/dev/null || true
+    
+    echo "Instalando dependencias (puede tomar varios minutos)..."
+    lxc exec ebpf-blockchain-2 -- bash /opt/install-deps.sh || {
+        echo -e "${YELLOW}Advertencia: La instalación falló. Verifica la conectividad a internet.${NC}"
+        echo "Puedes reintentar manualmente: lxc exec ebpf-blockchain-2 -- bash /opt/install-deps.sh"
+    }
+else
+    echo "Dependencias ya instaladas."
 fi
 
 # Montar proyecto
