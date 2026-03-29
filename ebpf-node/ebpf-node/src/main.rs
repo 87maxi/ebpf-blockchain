@@ -18,6 +18,7 @@ use libp2p::{
     Multiaddr,
     futures::{StreamExt, SinkExt},
     gossipsub, identify, mdns, noise,
+    request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
@@ -73,6 +74,20 @@ pub struct Transaction {
 pub enum NetworkMessage {
     TxProposal(Transaction),
     Vote { tx_id: String, peer_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncRequest;
+
+impl SyncRequest {
+    fn protocol() -> &'static str {
+        "/ebpf-blockchain/sync/1.0.0"
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResponse {
+    pub transactions: Vec<Transaction>,
 }
 
 type AppState = (mpsc::Sender<Transaction>, broadcast::Sender<String>);
@@ -134,6 +149,7 @@ struct Opt {
 struct MyBehaviour {
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
+    sync: request_response::cbor::Behaviour<SyncRequest, SyncResponse>,
     mdns: mdns::tokio::Behaviour,
 }
 
@@ -249,13 +265,19 @@ async fn main() -> anyhow::Result<()> {
                 key.public().to_peer_id(),
             )?;
 
+            let sync = request_response::cbor::Behaviour::new(
+                [(libp2p::StreamProtocol::new(SyncRequest::protocol()), request_response::ProtocolSupport::Full)],
+                request_response::Config::default(),
+            );
+
             Ok(MyBehaviour {
                 gossipsub,
                 identify,
+                sync,
                 mdns,
             })
         })?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(120)))
         .build();
 
     let listen_addrs = if opt.listen_addresses.is_empty() {
@@ -405,6 +427,54 @@ async fn main() -> anyhow::Result<()> {
                         swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                     }
                 }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
+                    info!(event = "p2p_identify", peer = %peer_id, agent = %info.agent_version, "Identified peer");
+                    // Trigger historical sync when a peer is identified
+                    info!(event = "sync_request_sent", target = %peer_id, "Requesting historical sync");
+                    swarm.behaviour_mut().sync.send_request(&peer_id, SyncRequest);
+                }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Sync(request_response::Event::Message {
+                    peer,
+                    message,
+                    ..
+                })) => match message {
+                    request_response::Message::Request { request: SyncRequest, channel, .. } => {
+                        debug!(event = "sync_request_received", from = %peer, "Received sync request, scanning RocksDB");
+                        let mut transactions = Vec::new();
+                        let iter = db.iterator(rocksdb::IteratorMode::Start);
+                        for item in iter {
+                            if let Ok((id, data)) = item {
+                                if let (Ok(id_str), Ok(data_str)) = (String::from_utf8(id.to_vec()), String::from_utf8(data.to_vec())) {
+                                    if !data_str.starts_with("Approved by") { // Only send original data if possible
+                                        transactions.push(Transaction { id: id_str, data: data_str });
+                                    } else {
+                                        // For now just send what we have
+                                        transactions.push(Transaction { id: id_str, data: data_str });
+                                    }
+                                }
+                            }
+                        }
+                        info!(event = "sync_response_sent", target = %peer, count = transactions.len(), "Sending historical sync response");
+                        let _ = swarm.behaviour_mut().sync.send_response(channel, SyncResponse { transactions });
+                    }
+                    request_response::Message::Response { response, .. } => {
+                        info!(event = "sync_response_received", from = %peer, count = response.transactions.len(), "Processing historical sync");
+                        for tx in response.transactions {
+                            // Idempotent put: if we already have it, it's fine.
+                            // We don't want to overwrite "Approved by" with basic data if we already approved it.
+                            if db.get(tx.id.as_bytes()).unwrap_or(None).is_none() {
+                                let _ = db.put(tx.id.as_bytes(), tx.data.as_bytes());
+                                let approval_alert = serde_json::json!({
+                                    "event": "BlockSynced",
+                                    "tx_id": tx.id,
+                                    "data": tx.data
+                                }).to_string();
+                                let _ = tx_ws.send(approval_alert);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
             _ = signal::ctrl_c() => {
