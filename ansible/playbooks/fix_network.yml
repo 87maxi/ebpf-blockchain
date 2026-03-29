@@ -1,0 +1,27 @@
+---
+- name: Fix LXC Bridge Connectivity
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Allow traffic on lxdbr1 bridge
+      iptables:
+        chain: FORWARD
+        in_interface: lxdbr1
+        out_interface: lxdbr1
+        jump: ACCEPT
+      ignore_errors: true
+
+    - name: Allow traffic from lxdbr1 to anywhere (NAT)
+      iptables:
+        chain: FORWARD
+        in_interface: lxdbr1
+        jump: ACCEPT
+      ignore_errors: true
+
+    - name: Allow traffic to lxdbr1 from anywhere (Related/Established)
+      iptables:
+        chain: FORWARD
+        out_interface: lxdbr1
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+      ignore_errors: true
