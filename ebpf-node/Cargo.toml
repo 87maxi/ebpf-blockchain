@@ -26,7 +26,7 @@ cargo_metadata = { version = "0.23.0", default-features = false }
 clap = { version = "4.5.20", default-features = false, features = ["std"] }
 env_logger = { version = "0.11.5", default-features = false }
 libc = { version = "0.2.159", default-features = false }
-libp2p = { version = "0.54", features = ["tcp", "dns", "quic", "gossipsub", "noise", "yamux", "kad", "identify", "macros", "tokio"] }
+libp2p = { version = "0.54", features = ["tcp", "dns", "quic", "gossipsub", "noise", "yamux", "kad", "identify", "macros", "tokio", "mdns"] }
 log = { version = "0.4.22", default-features = false }
 network-types = { version = "0.0.7", default-features = false }
 tokio = { version = "1.40.0", default-features = false }

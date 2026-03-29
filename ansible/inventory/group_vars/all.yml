@@ -1,0 +1,59 @@
+---
+# Global variables for all hosts
+
+# Project configuration
+project_dir: /home/maxi/Documentos/source/ebpf-blockchain
+
+# LXC configuration
+lxc_defaults:
+  image: ubuntu:22.04
+  profile: ebpf-blockchain
+  cpu_limit: "2"
+  memory_limit: 4GiB
+  network_bridge: lxdbr1
+
+# Network configuration
+network:
+  subnet: 192.168.2.0/24
+  gateway: 192.168.2.200
+  nameservers:
+    - 8.8.8.8
+    - 8.8.4.4
+
+# Node defaults
+node_defaults:
+  user: root
+  home: /root
+  rust_version: nightly
+
+# Monitoring configuration
+monitoring:
+  prometheus:
+    port: 9090
+    retention: 15d
+  grafana:
+    port: 3000
+    admin_user: admin
+    admin_password: admin
+  alertmanager:
+    port: 9093
+
+# Dependencies
+system_packages:
+  - build-essential
+  - clang
+  - llvm
+  - libelf-dev
+  - libbpf-dev
+  - curl
+  - git
+  - wget
+  - pkg-config
+  - libssl-dev
+  - bc
+  - bison
+  - flex
+
+rust_crates:
+  - bpf-linker
+  - cargo-watch

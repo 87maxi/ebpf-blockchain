@@ -1,0 +1,156 @@
+---
+- name: eBPF Cluster Setup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+
+  vars:
+    num_nodes: 3
+    base_ip: "192.168.2"
+    start_ip: 10
+    project_dir: /home/maxi/Documentos/source/ebpf-blockchain
+
+  tasks:
+    - name: Ensure lxdbr1 network exists
+      shell: |
+        if ! lxc network show lxdbr1 >/dev/null 2>&1; then
+          lxc network create lxdbr1 ipv4.address={{ base_ip }}.1/24 ipv4.nat=true ipv6.address=none
+        fi
+
+    - name: Enable IP forwarding on host
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: yes
+
+    - name: Allow forwarding for lxdbr1 bridge
+      iptables:
+        chain: FORWARD
+        in_interface: lxdbr1
+        out_interface: lxdbr1
+        jump: ACCEPT
+    - name: Launch LXC nodes
+      shell: |
+        if ! lxc info ebpf-node-{{ item }} >/dev/null 2>&1; then
+          lxc launch ubuntu:24.04 ebpf-node-{{ item }} -p ebpf-blockchain
+        fi
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Wait for nodes
+      pause:
+        seconds: 25
+
+    - name: Set LXC limits for eBPF
+      shell: |
+        lxc config set ebpf-node-{{ item }} limits.memory.swap false
+        lxc config set ebpf-node-{{ item }} security.privileged true
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Freeze DNS configuration
+      shell: |
+        lxc exec ebpf-node-{{ item }} -- bash -c "
+          rm -f /etc/resolv.conf && \
+          echo 'nameserver 8.8.8.8' > /etc/resolv.conf && \
+          chattr +i /etc/resolv.conf
+        "
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      ignore_errors: true
+
+    - name: Configure network for each node (Fixing Gateway to 192.168.2.1)
+      shell: |
+        IP="{{ base_ip }}.$(({{ start_ip }} + {{ item }}))"
+        GATEWAY="{{ base_ip }}.1"
+        lxc exec ebpf-node-{{ item }} -- bash -c "
+          cat <<EOF > /etc/netplan/10-lxc.yaml
+        network:
+          version: 2
+          ethernets:
+            eth0:
+              dhcp4: no
+              addresses: [$IP/24]
+              routes:
+                - to: default
+                  via: $GATEWAY
+              nameservers:
+                addresses: [8.8.8.8, 1.1.1.1]
+        EOF
+          # Aplicación manual para bypass de udev
+          ip addr add $IP/24 dev eth0 || true
+          ip route add default via $GATEWAY dev eth0 || true
+
+        "
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Install system deps + eBPF debug tools
+      shell: |
+        lxc exec ebpf-node-{{ item }} -- bash -c "
+          # 1. Forzar DNS y Ruta por si falló lo anterior
+          ip route add default via 192.168.2.1 dev eth0 || true
+
+          # 2. Actualizar e Instalar con sintaxis correcta (uso de \)
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential clang llvm libelf-dev libbpf-dev curl git make \
+            bpfcc-tools bpftrace linux-tools-generic \
+              netperf iperf3 tcpdump wireshark-common strace ltrace gdb \
+            python3 python3-pip pahole
+        "
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Install Rust
+      shell: |
+        lxc exec ebpf-node-{{ item }} -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Install Rust nightly
+      ansible.builtin.shell: |
+        lxc exec ebpf-node-{{ item }} -- bash -c "source /root/.cargo/env && rustup toolchain install nightly --component rust-src && rustup default nightly"
+        lxc exec ebpf-node-{{ item }} -- bash -c "source /root/.cargo/env && cargo install bpf-linker"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      register: install_result
+      failed_when: false
+      retries: 3
+      delay: 30
+      until: install_result.rc == 0
+
+    - name: Mount project
+      shell: |
+        lxc config device add ebpf-node-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Detach any existing XDP programs
+      shell: "lxc exec ebpf-node-{{ item }} -- ip link set dev eth0 xdp off 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Build eBPF node (on node 1)
+      shell: |
+        lxc exec ebpf-node-1 -- bash -c "source /root/.cargo/env && cd /root/ebpf-blockchain/ebpf-node && cargo build --release"
+
+    - name: Start node 1 and get Peer ID
+      shell: |
+        lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && nohup ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' > /tmp/ebpf.log 2>&1 &"
+        sleep 5
+        lxc exec ebpf-node-1 -- bash -c "grep 'Local Peer ID' /tmp/ebpf.log | awk '{print \$NF}' | tr -d '\r\n'"
+      register: node1_peer_id
+
+    - name: Start remaining P2P nodes
+      shell: |
+        IP1="{{ base_ip }}.$(({{ start_ip }} + 1))"
+        lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && nohup ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}' > /tmp/ebpf.log 2>&1 &"
+      loop: "{{ range(2, num_nodes | int + 1) | list }}"
+
+    - name: Configure Prometheus
+      template:
+        src: "{{ playbook_dir }}/../roles/monitoring/templates/prometheus.yml.j2"
+        dest: "{{ project_dir }}/monitoring/prometheus/prometheus.yml"
+        mode: "0644"
+
+    - name: Restart Prometheus
+      shell: "docker restart prometheus"
+      failed_when: false
+
+    - name: Show result
+      debug:
+        msg: "Cluster ready! Nodes: {{ num_nodes }} | Grafana: http://localhost:3000 | Prometheus: http://localhost:9090 | Logs: lxc exec ebpf-node-1 -- tail -f /tmp/ebpf.log"

@@ -1,0 +1,26 @@
+---
+- name: Factory Reset eBPF Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  vars:
+    num_nodes: 3
+
+  tasks:
+    - name: Warn user
+      debug:
+        msg: "⚠️ This will delete all LXC ebpf-node containers losing all unmounted data."
+
+    - name: Stop LXC nodes
+      shell: "lxc stop ebpf-node-{{ item }} --force 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Delete LXC nodes
+      shell: "lxc delete ebpf-node-{{ item }} --force 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Result
+      debug:
+        msg: "🗑️ LXC Nodes have been factory reset successfully. Ready for deploy_cluster.yml."

@@ -1,0 +1,123 @@
+---
+- name: Check if dependencies are already installed
+  command: test -f {{ ansible_env.HOME }}/.deps-installed
+  register: deps_installed_check
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  register: apt_update
+  when: deps_installed_check.rc != 0
+
+- name: Install system dependencies
+  apt:
+    name:
+      - build-essential
+      - clang
+      - llvm
+      - libelf-dev
+      - libbpf-dev
+      - curl
+      - git
+      - wget
+      - pkg-config
+      - libssl-dev
+      - bc
+      - bison
+      - flex
+      - libelf-dev
+    state: present
+  register: system_deps
+  when: deps_installed_check.rc != 0
+
+- name: Create log directory
+  file:
+    path: "{{ ansible_env.HOME }}/.ebpf-logs"
+    state: directory
+  changed_when: false
+
+- name: Check if Rust is installed
+  command: test -d {{ ansible_env.HOME }}/.cargo
+  register: rust_check
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Rust
+  shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source {{ ansible_env.HOME }}/.cargo/env
+  args:
+    creates: "{{ ansible_env.HOME }}/.cargo/bin/rustc"
+  environment:
+    CARGO_HOME: "{{ ansible_env.HOME }}/.cargo"
+    RUSTUP_HOME: "{{ ansible_env.HOME }}/.rustup"
+  when: rust_check.rc != 0
+  register: rust_install
+  changed_when: true
+
+- name: Add cargo to PATH
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="{{ ansible_env.HOME }}/.cargo/bin:$PATH"'
+    insertafter: EOF
+  changed_when: false
+
+- name: Source cargo environment
+  shell: |
+    if [ -f {{ ansible_env.HOME }}/.cargo/env ]; then
+      source {{ ansible_env.HOME }}/.cargo/env
+    fi
+    echo "export PATH=\"{{ ansible_env.HOME }}/.cargo/bin:\$PATH\"" >> {{ ansible_env.HOME }}/.profile
+  changed_when: false
+
+- name: Install Rust nightly toolchain
+  shell: |
+    source {{ ansible_env.HOME }}/.cargo/env
+    rustup toolchain install nightly --component rust-src
+    rustup default nightly
+  register: rust_nightly
+  changed_when: false
+  failed_when: false
+
+- name: Check installed Rust version
+  shell: |
+    source {{ ansible_env.HOME }}/.cargo/env
+    rustc --version
+    cargo --version
+  register: rust_version
+  changed_when: false
+  failed_when: false
+
+- name: Install cargo crates
+  shell: |
+    source {{ ansible_env.HOME }}/.cargo/env
+    cargo install bpf-linker --force 2>&1 | tee -a {{ ansible_env.HOME }}/.ebpf-logs/crates.log || true
+    cargo install cargo-watch --force 2>&1 | tee -a {{ ansible_env.HOME }}/.ebpf-logs/crates.log || true
+  register: cargo_crates
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  async: 1800
+  poll: 30
+
+- name: Mark dependencies as installed
+  file:
+    path: "{{ ansible_env.HOME }}/.deps-installed"
+    state: touch
+  changed_when: false
+
+- name: Display installation summary
+  debug:
+    msg: |
+      ========================================
+      Dependencies Installation Summary
+      ========================================
+      Rust: {{ rust_version.stdout | default('N/A') }}
+      System packages: {{ 'Installed' if system_deps.changed else 'Already present' }}
+      Crates: {{ 'Installing (async)' if cargo_crates.changed else 'Available' }}
+      ========================================

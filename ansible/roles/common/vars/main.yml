@@ -1,0 +1,12 @@
+---
+lxc_defaults:
+  image: ubuntu:22.04
+  profile: ebpf-blockchain
+  cpu_limit: "2"
+  memory_limit: 4GiB
+
+network_config:
+  flush_dev: eth0
+  nameservers:
+    - 8.8.8.8
+    - 8.8.4.4

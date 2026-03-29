@@ -1,0 +1,76 @@
+---
+- name: Rebuild and Restart eBPF Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  vars:
+    num_nodes: 3
+    base_ip: "192.168.2"
+    start_ip: 10
+    project_dir: "/home/maxi/Documentos/source/ebpf-blockchain"
+
+  tasks:
+    - name: Ensure LXC nodes are running
+      shell: "lxc start ebpf-node-{{ item }} 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Configure static node IPs
+      shell: "lxc exec ebpf-node-{{ item }} -- ip addr add {{ base_ip }}.$(({{ start_ip }} + {{ item }}))/24 dev eth0 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Force Rust timestamp bypass to avoid clock skew block
+      shell: "lxc exec ebpf-node-1 -- touch /root/ebpf-blockchain/ebpf-node/ebpf-node/src/main.rs"
+      when: false
+
+    - name: Rebuild Rust project inside Node 1
+      shell: |
+        lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && cargo build --release"
+
+    - name: Kill running eBPF nodes
+      shell: "lxc exec ebpf-node-{{ item }} -- killall ebpf-node 2>/dev/null || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Restart Prometheus and Grafana in Docker
+      shell: "docker restart prometheus grafana"
+      args:
+        chdir: "{{ project_dir }}"
+
+    - name: Start Master Node (Node 1)
+      shell: |
+        nohup lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1'" > /tmp/ebpf-node-1.log 2>&1 &
+
+    - name: Wait for Node 1 to generate Peer ID
+      pause:
+        seconds: 5
+
+    - name: Extract Peer ID from Node 1
+      shell: "lxc exec ebpf-node-1 -- cat /tmp/peer_id.txt | tr -d '\r\n'"
+      register: node1_peer_id
+
+    - name: Fail if Peer ID is empty
+      fail:
+        msg: "Failed to extract Peer ID from Node 1. Ensure node 1 compiled and started correctly."
+      when: node1_peer_id.stdout == ''
+
+    - name: Start Slave Nodes (Node 2 and 3)
+      shell: |
+        nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/{{ base_ip }}.11/tcp/50000/p2p/{{ node1_peer_id.stdout }}'" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
+      loop: "{{ range(2, num_nodes | int + 1) | list }}"
+
+    - name: Verify Metrics Target Connectivity
+      uri:
+        url: "http://{{ base_ip }}.{{ start_ip | int + item | int }}:9090/metrics"
+        return_content: false
+        status_code: 200
+        timeout: 5
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      register: metrics_check
+      retries: 3
+      delay: 5
+      until: metrics_check.status == 200
+
+    - name: Final Result
+      debug:
+        msg: "✅ All nodes restarted, rebuilt, and Prometheus metrics accessible via P2P network."

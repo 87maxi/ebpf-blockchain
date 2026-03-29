@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'ebpf-blockchain'
+    environment: 'development'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'ebpf_nodes'
+    static_configs:
+      - targets: ['192.168.2.11:9090']
+        labels:
+          node_name: 'ebpf-node-1'
+          node_type: 'ebpf'
+      - targets: ['192.168.2.12:9090']
+        labels:
+          node_name: 'ebpf-node-2'
+          node_type: 'ebpf'
+      - targets: ['192.168.2.13:9090']
+        labels:
+          node_name: 'ebpf-node-3'
+          node_type: 'ebpf'
+
+  - job_name: 'attacker_nodes'
+    static_configs:
+      - targets: ['192.168.2.221:9090']
+        labels:
+          node_name: 'ebpf-attacker-1'
+          node_type: 'attacker'
+
+  - job_name: 'victim_nodes'
+    static_configs:
+      - targets: ['192.168.2.231:9090']
+        labels:
+          node_name: 'ebpf-victim-1'
+          node_type: 'victim'

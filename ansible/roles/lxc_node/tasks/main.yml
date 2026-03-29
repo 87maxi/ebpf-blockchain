@@ -1,0 +1,140 @@
+---
+- name: Validate required variables
+  assert:
+    that:
+      - node_name is defined
+      - node_ip is defined
+    fail_msg: "node_name and node_ip must be defined"
+
+- name: Check if LXC is installed
+  command: which lxc
+  register: lxc_check
+  failed_when: false
+  changed_when: false
+
+- name: Fail if LXC is not installed
+  fail:
+    msg: "LXC is not installed. Please install LXD/LXC first."
+  when: lxc_check.rc != 0
+
+- name: Check if node exists
+  command: lxc info {{ node_name }}
+  register: node_info
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Create LXC profile if not exists
+  command: lxc profile list
+  register: profile_list
+  changed_when: false
+  failed_when: false
+
+- name: Create ebpf-blockchain profile
+  command:
+    cmd: |
+      lxc profile edit ebpf-blockchain << 'EOF'
+      name: ebpf-blockchain
+      config:
+        limits.cpu: "2"
+        limits.memory: 4GiB
+        security.privileged: "true"
+        security.syscalls.intercept.bpf: "true"
+        security.syscalls.intercept.bpf.devices: "true"
+      devices:
+        root:
+          path: /
+          pool: default
+          type: disk
+        eth0:
+          name: eth0
+          network: lxdbr1
+          type: nic
+      EOF
+  when: "'ebpf-blockchain' not in profile_list.stdout"
+  register: profile_create
+  failed_when: false
+  changed_when: profile_create.rc == 0
+
+- name: Launch new LXC container
+  command: lxc launch ubuntu:22.04 {{ node_name }} -p ebpf-blockchain
+  when:
+    - node_info.rc != 0
+    - "'ebpf-blockchain' in profile_list.stdout"
+  register: container_launch
+  retries: 3
+  delay: 5
+  until: container_launch.rc == 0
+
+- name: Clone from existing container if specified
+  command: lxc copy {{ clone_source | default('ebpf-blockchain') }} {{ node_name }}
+  when:
+    - node_info.rc != 0
+    - clone_source is defined
+  register: container_clone
+  failed_when: false
+  changed_when: container_clone.rc == 0
+
+- name: Start existing container
+  command: lxc start {{ node_name }}
+  when: node_info.rc != 0 and container_launch.rc != 0
+  register: container_start
+  failed_when: false
+
+- name: Wait for container to be running
+  wait_for:
+    timeout: 30
+  when: node_info.rc != 0
+
+- name: Get container state
+  command: lxc info {{ node_name }}
+  register: node_state
+  changed_when: false
+  failed_when: false
+
+- name: Flush network interface
+  command: lxc exec {{ node_name }} -- ip addr flush dev eth0
+  failed_when: false
+  changed_when: false
+
+- name: Configure node IP address
+  command: lxc exec {{ node_name }} -- ip addr add {{ node_ip }}/24 dev eth0
+  register: ip_config
+  failed_when: false
+  changed_when: false
+
+- name: Configure default route
+  command: lxc exec {{ node_name }} -- ip route add default via {{ lxc_gateway | default('192.168.2.200') }}
+  register: route_config
+  failed_when: false
+  changed_when: false
+
+- name: Configure DNS servers
+  copy:
+    content: |
+      nameserver 8.8.8.8
+      nameserver 8.8.4.4
+    dest: /tmp/resolv-{{ node_name }}.conf
+  delegate_to: localhost
+  changed_when: false
+
+- name: Push DNS configuration
+  command: lxc file push /tmp/resolv-{{ node_name }}.conf {{ node_name }}/etc/resolv.conf
+  changed_when: false
+  failed_when: false
+
+- name: Verify network connectivity
+  command: lxc exec {{ node_name }} -- ping -c 2 8.8.8.8
+  register: connectivity
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Set node facts
+  set_fact:
+    node_created: "{{ node_info.rc != 0 and (container_launch.rc == 0 or container_clone.rc == 0) }}"
+    node_started: "{{ 'Running' in node_state.stdout }}"
+
+- name: Display node status
+  debug:
+    msg: "Node {{ node_name }} ({{ node_ip }}) - Created: {{ node_created }}, Running: {{ node_started }}"
