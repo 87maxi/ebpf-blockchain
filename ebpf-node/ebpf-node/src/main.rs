@@ -1,6 +1,6 @@
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 
-use log::{debug, info, warn};
+
 use axum::{
     Router,
     extract::{State, ws::{WebSocket, WebSocketUpgrade, Message}},
@@ -29,6 +29,7 @@ use prometheus::{
 use rocksdb::DB;
 use serde::{Deserialize, Serialize};
 use tokio::{signal, sync::{broadcast, mpsc}, time};
+use tracing::{info, warn, error, debug};
 
 lazy_static! {
     static ref LATENCY_BUCKETS: IntGaugeVec = register_int_gauge_vec!(
@@ -138,9 +139,15 @@ struct MyBehaviour {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
+            .add_directive(tracing::Level::INFO.into()))
+        .json()
+        .init();
+
     let opt = Opt::parse();
 
-    env_logger::init();
+    info!(event = "node_startup", iface = %opt.iface, "eBPF Node starting...");
     initialize_metrics();
 
     let rlim = libc::rlimit {
@@ -291,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Some(tx) = rx_rpc.recv() => {
-                info!("Received RPC Tx: {:?}", tx);
+                info!(event = "rpc_tx_received", tx_id = %tx.id, data = %tx.data, "Received RPC Transaction");
                 let msg = NetworkMessage::TxProposal(tx);
                 if let Ok(payload) = serde_json::to_vec(&msg) {
                     if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), payload) {
@@ -305,6 +312,12 @@ async fn main() -> anyhow::Result<()> {
                     message_id: _,
                     message,
                 })) => {
+                    info!(
+                        event = "gossip_msg_received",
+                        msg_type = ?message.topic,
+                        data_len = message.data.len(),
+                        "Received gossip message"
+                    );
                     MESSAGES_RECEIVED.with_label_values(&["gossip"]).inc();
                     let sender = propagation_source.to_string();
                     PACKETS_TRACE.with_label_values(&[&sender, "gossip"]).inc();
@@ -312,7 +325,13 @@ async fn main() -> anyhow::Result<()> {
                     if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&message.data) {
                         match net_msg {
                             NetworkMessage::TxProposal(tx) => {
-                                info!("Gossip TxProposal from {}: {:?}", sender, tx);
+                                info!(
+                                    event = "gossip_tx_proposal",
+                                    sender = %sender,
+                                    tx_id = %tx.id,
+                                    data = %tx.data,
+                                    "Received Gossip TxProposal"
+                                );
                                 // Solana-like Consensus: Validate & Vote via Gossip
                                 let vote = NetworkMessage::Vote { 
                                     tx_id: tx.id.clone(), 
@@ -323,7 +342,12 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
                             NetworkMessage::Vote { tx_id, peer_id } => {
-                                info!("Gossip Vote for {} from {}", tx_id, peer_id);
+                                info!(
+                                    event = "gossip_vote_received",
+                                    tx_id = %tx_id,
+                                    voter = %peer_id,
+                                    "Consensus Vote Received"
+                                );
                                 // Consensus Approved: Store in RocksDB and Emit via WS
                                 let approval_val = format!("Approved by {}", peer_id);
                                 let _ = db.put(tx_id.as_bytes(), approval_val.as_bytes());
@@ -354,7 +378,8 @@ async fn main() -> anyhow::Result<()> {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Listening on {:?}", address);
                 }
-                SwarmEvent::ConnectionEstablished { .. } => {
+                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                    info!(event = "p2p_connected", peer = %peer_id, "New peer connected");
                     PEERS_CONNECTED.with_label_values(&["connected"]).inc();
                 }
                 SwarmEvent::ConnectionClosed { .. } => {
