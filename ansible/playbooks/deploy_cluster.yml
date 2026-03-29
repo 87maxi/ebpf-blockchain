@@ -3,7 +3,7 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  become: true
+  become: false
 
   vars:
     num_nodes: 3
@@ -24,6 +24,7 @@
         value: "1"
         state: present
         reload: yes
+      become: true
 
     - name: Allow forwarding for lxdbr1 bridge
       iptables:
@@ -31,6 +32,7 @@
         in_interface: lxdbr1
         out_interface: lxdbr1
         jump: ACCEPT
+      become: true
     - name: Launch LXC nodes
       shell: |
         if ! lxc info ebpf-node-{{ item }} >/dev/null 2>&1; then
@@ -130,15 +132,15 @@
 
     - name: Start node 1 and get Peer ID
       shell: |
-        lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && nohup ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' > /tmp/ebpf.log 2>&1 &"
+        nohup lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1'" > /tmp/ebpf-node-1.log 2>&1 &
         sleep 5
-        lxc exec ebpf-node-1 -- bash -c "grep 'Local Peer ID' /tmp/ebpf.log | awk '{print \$NF}' | tr -d '\r\n'"
+        lxc exec ebpf-node-1 -- cat /tmp/peer_id.txt | tr -d '\r\n'
       register: node1_peer_id
 
     - name: Start remaining P2P nodes
       shell: |
         IP1="{{ base_ip }}.$(({{ start_ip }} + 1))"
-        lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && nohup ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}' > /tmp/ebpf.log 2>&1 &"
+        nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}'" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
       loop: "{{ range(2, num_nodes | int + 1) | list }}"
 
     - name: Configure Prometheus
