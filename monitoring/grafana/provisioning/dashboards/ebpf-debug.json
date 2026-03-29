@@ -20,488 +20,210 @@
   "liveNow": true,
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 30,
-            "lineWidth": 1,
-            "pointSize": 5
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "legend": {
-          "calcs": ["lastNotNull", "mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "expr": "ebpf_node_latency_buckets",
-          "legendFormat": "bucket_2^{{bucket}}",
-          "refId": "A"
-        }
-      ],
-      "title": "eBPF Latency Buckets (Debug)",
-      "type": "timeseries"
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Global Cluster Status",
+      "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "lineWidth": 2
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 101,
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "name" },
       "targets": [
-        {
-          "expr": "ebpf_node_messages_received_total",
-          "legendFormat": "{{type}}",
-          "refId": "A"
-        }
+        { "expr": "up{job='ebpf-nodes'}", "legendFormat": "{{instance}}", "refId": "A" }
       ],
-      "title": "Gossip Messages Received",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "title": "Nodes Online",
+      "type": "stat",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "green",
-                "value": 3
-              }
+              { "color": "dark-red", "value": null },
+              { "color": "dark-green", "value": 1 }
             ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "targets": [
-        {
-          "expr": "ebpf_node_peers_connected{status='connected'}",
-          "refId": "A"
+          }
         }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 102,
+      "options": { "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        { "expr": "sum(ebpf_node_peers_connected{instance=~\"$node\"}) by (instance)", "legendFormat": "{{instance}}", "refId": "A" }
       ],
       "title": "Peers Connected",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "type": "stat",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
+              { "color": "orange", "value": null },
+              { "color": "blue", "value": 2 }
             ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "targets": [
-        {
-          "expr": "sum(ebpf_node_messages_received_total)",
-          "refId": "A"
-        }
-      ],
-      "title": "Total Messages",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1
           }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 16
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
         }
-      },
-      "targets": [
-        {
-          "expr": "rate(ebpf_node_messages_received_total[1m])",
-          "legendFormat": "msg_rate_1m",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(ebpf_node_messages_received_total[5m])",
-          "legendFormat": "msg_rate_5m",
-          "refId": "B"
-        }
-      ],
-      "title": "Message Rate (Debug)",
-      "type": "timeseries"
+      }
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 103,
+      "options": { "colorMode": "value" },
+      "targets": [
+        { "expr": "sum(rate(ebpf_node_messages_received_total{instance=~\"$node\"}[1m])) by (instance)", "legendFormat": "{{instance}}", "refId": "A" }
+      ],
+      "title": "Gossip MPS",
+      "type": "stat",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 60
-              },
-              {
-                "color": "green",
-                "value": 300
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 0,
-        "y": 24
-      },
-      "id": 7,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "targets": [
-        {
-          "expr": "time() - process_start_time_seconds",
-          "legendFormat": "uptime",
-          "refId": "A"
+          "unit": "pps",
+          "color": { "fixedColor": "cyan", "mode": "fixed" }
         }
-      ],
-      "title": "Node Uptime (seconds)",
-      "type": "stat"
+      }
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 1 },
+      "id": 104,
+      "options": { "colorMode": "value", "justifyMode": "center" },
+      "targets": [
+        { "expr": "sum(ebpf_node_gossip_packets_trace_total{instance=~\"$node\"})", "refId": "A" }
+      ],
+      "title": "Global Data Ingested (Packets)",
+      "type": "stat",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 100000000
-              },
-              {
-                "color": "red",
-                "value": 500000000
-              }
-            ]
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 8,
-        "y": 24
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "targets": [
-        {
-          "expr": "process_resident_memory_bytes",
-          "legendFormat": "memory",
-          "refId": "A"
+          "color": { "fixedColor": "purple", "mode": "fixed" }
         }
-      ],
-      "title": "Memory Usage",
-      "type": "stat"
+      }
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisPlacement": "auto",
-            "drawStyle": "line"
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 28
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "expr": "up",
-          "legendFormat": "{{job}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Node Status Debug",
-      "type": "timeseries"
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 200,
+      "title": "Transaction Ledger & Consensus (Loki)",
+      "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 28
-      },
-      "id": 10,
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
+      "id": 201,
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        }
+        "showHeader": true
       },
       "targets": [
-        {
-          "expr": "prometheus_tsdb_head_series",
-          "legendFormat": "tsdb_series",
-          "refId": "A"
-        }
+        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"rpc_tx_received\" | line_format \"{{.tx_id}} | {{.data}}\"", "format": "table", "refId": "A" }
       ],
-      "title": "TSDB Metrics Count",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 24,
-        "x": 0,
-        "y": 36
-      },
-      "id": 11,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "style": "background"
-        },
-        "content": "DEBUG INFO: eBPF Node running on 192.168.2.201 - XDP attached to eth0 - Gossipsub P2P active",
-        "mode": "text"
-      },
-      "targets": [],
-      "title": "System Debug Info",
-      "type": "text"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 40
-      },
-      "id": 12,
-      "options": {
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Value"
-          }
-        ]
-      },
-      "targets": [
-        {
-          "expr": "increase(ebpf_node_gossip_packets_trace_total[5m]) > 0",
-          "format": "table",
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Gossip Packet Trace Dump (Trace by Sender)",
+      "title": "Mempool Ingest (RPC)",
       "type": "table"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
+      "id": 202,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"gossip_tx_proposal\" | line_format \"{{.tx_id}} | from {{.sender}}\"", "format": "table", "refId": "A" }
+      ],
+      "title": "Propagation Stream (Gossip)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "id": 203,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"gossip_vote_received\" | line_format \"{{.tx_id}} | Voted by {{.voter}}\"", "format": "table", "refId": "A" }
+      ],
+      "title": "Consensus Approvals (Votes)",
+      "type": "table"
+    },
+    {
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 300,
+      "title": "eBPF Kernel Insight (Latency Distribution)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 15 },
+      "id": 301,
+      "options": {
+        "calculate": { "toggle": false },
+        "cellGap": 1,
+        "color": { "mode": "scheme", "scheme": "Oranges" },
+        "exemplars": { "color": "rgba(255,0,255,1)" },
+        "tooltip": { "show": true }
+      },
+      "targets": [
+        { "expr": "ebpf_node_latency_buckets{instance=~\"$node\"}", "legendFormat": "{{bucket}}", "refId": "A" }
+      ],
+      "title": "eBPF Kernel Latency Heatmap",
+      "type": "heatmap"
+    },
+    {
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 400,
+      "title": "System Logs (All Events)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+      "id": 401,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        { "expr": "{job=\"ebpf-nodes\"}", "refId": "A" }
+      ],
+      "title": "Node Event Stream (JSON Debug)",
+      "type": "logs"
     }
   ],
   "refresh": "2s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["ebpf", "debug", "p2p", "testing"],
+  "tags": ["ebpf", "p2p", "cluster", "observability", "loki"],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": { "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(up{job='ebpf-nodes'}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Node",
+        "multi": true,
+        "name": "node",
+        "query": { "query": "label_values(up{job='ebpf-nodes'}, instance)", "refId": "PrometheusVariableQuery" },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
   },
-  "time": {
-    "from": "now-5m",
-    "to": "now"
-  },
-  "timepicker": {
-    "refresh_intervals": ["1s", "2s", "5s", "10s"]
-  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": { "refresh_intervals": ["1s", "2s", "5s", "10s"] },
   "timezone": "browser",
-  "title": "eBPF P2P Debug Dashboard",
+  "title": "eBPF P2P Debug",
   "uid": "ebpf-debug",
-  "version": 1,
-  "weekStart": ""
+  "version": 4
 }
