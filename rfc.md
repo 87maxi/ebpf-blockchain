@@ -1,8 +1,8 @@
 # RFC 001: Arquitectura de Blockchain con Observabilidad Nativa (eBPF) y Networking P2P (libp2p)
 
 **Estado:** DRAFT (Borrador de Investigación)
-**Versión:** 1.3.0
-**Fecha:** 27 de febrero de 2026
+**Versión:** 1.3.1
+**Fecha:** 29 de marzo de 2026
 **Autor:** Maximiliano Paredes
 **Categoría:** Infraestructura de Sistemas Distribuidos / Seguridad de Red
 
@@ -36,10 +36,8 @@ Para garantizar la confidencialidad a largo plazo, el nodo implementa una rotaci
 ## 4. COMUNICACIÓN KERNEL-USUARIO: eBPF MAPS
 El núcleo de la eficiencia reside en los **eBPF Maps**, que permiten que la aplicación (espacio de usuario) y el kernel compartan información con latencia cercana a cero.
 
-
-
 ### 4.1. Definición de Mapas Técnicos:
-* **nodes_blacklist (LPM_TRIE):** Bloqueo inmediato de IPs en capa 3.
+* **nodes_blacklist (LPM_TRIE):** Bloqueo inmediato de IPs en capa 3. Soporta rangos CIDR para mitigación de botnets.
 * **latency_stats (HISTOGRAM):** Registra tiempos de procesamiento (NIC -> App -> NIC) usando `uprobes`.
 * **ratelimit_cfg (HASH):** Control de ancho de banda por Peer.
 
@@ -58,17 +56,21 @@ Para una visibilidad total sin impacto en el rendimiento, se implementa una sond
 #### Justificación técnica:
 El uso de `kprobes` permite rastrear funciones del kernel sin modificar el código fuente de libp2p o la aplicación blockchain, ideal para debuguear comportamiento de red en entornos de producción.
 
-
-
-### 5.2. Manejo de Errores y Carga
-* **Backpressure con XDP:** Si la carga de CPU excede el 80%, el kernel descarta paquetes de nodos con baja reputación basándose en los datos de la sonda.
-* **Self-Healing:** En caso de desincronización de claves elípticas, el nodo dispara un protocolo de "Handshake de Emergencia".
-
 ---
 
-## 6. SEGURIDAD Y VULNERABILIDADES (FUZZING)
-* **Fuzzing de Protocolo:** Uso de **AFL++** sobre el parser de mensajes para evitar desbordamientos de búfer en la comunicación P2P.
-* **Mitigación de Nodos Maliciosos:** Los nodos que envíen bloques inválidos son baneados dinámicamente mediante la actualización del mapa `nodes_blacklist` desde la aplicación hacia el programa XDP del kernel.
+## 6. SEGURIDAD, RESILIENCIA Y ESCENARIOS DE ATAQUE (RFC Security Suite)
+
+Este apartado define los protocolos de defensa activa mediante la integración estrecha entre el espacio de usuario (Rust/Aya) y el kernel (eBPF).
+
+### 6.1. Protocolo de "Ataque y Víctima" (Dynamic Banning)
+Se implementa un mecanismo de autodefensa ante payloads maliciosos o comportamiento anómalo.
+*   **Detección (Attacker Payload):** El nodo "víctima" identifica un mensaje malicioso (ej. `ATTACK_VECTOR`) mediante el parser de Gossipsub o mediante la sonda eBPF si detecta ráfagas de paquetes que exceden el `ratelimit_cfg`.
+*   **Retroalimentación (Feedback Loop):** La aplicación en espacio de usuario utiliza la librería **Aya** para actualizar el mapa `nodes_blacklist` (tipo `LPM_TRIE`) de forma atómica.
+*   **Mitigación en Kernel (Victim Defense):** El programa XDP (eXpress Data Path) consulta el mapa en cada paquete entrante (`RX`). Si la IP coincide con una entrada en la blacklist, el paquete se descarta con `XDP_DROP` antes de que el stack TCP/IP del kernel procese los datos.
+
+### 6.2. Fuzzing y Verificación eBPF
+*   **Aya-Log para Debugging:** El desarrollo de defensas utiliza `aya-log` para emitir trazas desde el kernel hacia el espacio de usuario sin impactar el rendimiento de la red.
+*   **Simulación de Estrés:** Uso de `ebpf-simulation` en el host para generar cargas de trabajo reales y validar que el mapa `latency_stats` refleja correctamente los cuellos de botella bajo ataque.
 
 ---
 
