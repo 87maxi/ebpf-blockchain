@@ -26,6 +26,9 @@ libp2p = { workspace = true }
 axum = { workspace = true }
 prometheus = { workspace = true }
 lazy_static = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rocksdb = { workspace = true }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

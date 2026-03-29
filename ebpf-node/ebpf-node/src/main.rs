@@ -1,8 +1,13 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 
 use log::{debug, info, warn};
-use anyhow::Context as _;
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    extract::{State, ws::{WebSocket, WebSocketUpgrade, Message}},
+    routing::{get, post},
+    response::IntoResponse,
+    Json,
+};
 use aya::{
     maps::{HashMap, LpmTrie, lpm_trie::Key},
     programs::{KProbe, Xdp, XdpFlags},
@@ -11,7 +16,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use libp2p::{
     Multiaddr,
-    futures::StreamExt,
+    futures::{StreamExt, SinkExt},
     gossipsub, identify, mdns, noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
@@ -21,7 +26,9 @@ use prometheus::{
     register_int_counter, register_int_counter_vec, register_int_gauge,
     register_int_gauge_vec,
 };
-use tokio::{signal, time};
+use rocksdb::DB;
+use serde::{Deserialize, Serialize};
+use tokio::{signal, sync::{broadcast, mpsc}, time};
 
 lazy_static! {
     static ref LATENCY_BUCKETS: IntGaugeVec = register_int_gauge_vec!(
@@ -55,6 +62,20 @@ lazy_static! {
     .unwrap();
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Transaction {
+    pub id: String,
+    pub data: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum NetworkMessage {
+    TxProposal(Transaction),
+    Vote { tx_id: String, peer_id: String },
+}
+
+type AppState = (mpsc::Sender<Transaction>, broadcast::Sender<String>);
+
 async fn metrics_handler() -> String {
     let encoder = TextEncoder::new();
     let mut buffer = vec![];
@@ -63,16 +84,36 @@ async fn metrics_handler() -> String {
     String::from_utf8(buffer).unwrap()
 }
 
+async fn rpc_handler(
+    State((tx_rpc, _)): State<AppState>,
+    Json(payload): Json<Transaction>,
+) -> impl IntoResponse {
+    let _ = tx_rpc.send(payload).await;
+    axum::http::StatusCode::ACCEPTED
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State((_, tx_ws)): State<AppState>,
+) -> impl IntoResponse {
+    let rx = tx_ws.subscribe();
+    ws.on_upgrade(move |socket| handle_socket(socket, rx))
+}
+
+async fn handle_socket(mut socket: WebSocket, mut rx: broadcast::Receiver<String>) {
+    while let Ok(msg) = rx.recv().await {
+        if socket.send(Message::Text(msg)).await.is_err() {
+            break;
+        }
+    }
+}
+
 fn initialize_metrics() {
-    // Initialize latency buckets (0 to 63)
     for i in 0..64 {
         LATENCY_BUCKETS.with_label_values(&[&i.to_string()]).set(0);
     }
-    // Initialize connected peers
     PEERS_CONNECTED.with_label_values(&["connected"]).set(0);
-    // Initialize messages received
     MESSAGES_RECEIVED.with_label_values(&["gossip"]).inc_by(0);
-    // Initialize uptime
     UPTIME.inc_by(0);
 }
 
@@ -102,7 +143,6 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     initialize_metrics();
 
-    // Bump the memlock rlimit.
     let rlim = libc::rlimit {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
@@ -112,25 +152,47 @@ async fn main() -> anyhow::Result<()> {
         debug!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    // Load eBPF programs
+    // Initialize RocksDB
+    let db_path = format!("/tmp/rocksdb_{}", std::process::id());
+    info!("Initializing RocksDB at {}", db_path);
+    let db = Arc::new(DB::open_default(&db_path).unwrap());
+
+    // Setup Tokio async channels for Axum-Swarm communication
+    let (tx_rpc, mut rx_rpc) = mpsc::channel::<Transaction>(100);
+    let (tx_ws, _rx_ws) = broadcast::channel::<String>(100);
+
+    // Initialize Axum server
+    let tx_ws_clone = tx_ws.clone();
+    tokio::spawn(async move {
+        let app = Router::new()
+            .route("/metrics", get(metrics_handler))
+            .route("/rpc", post(rpc_handler))
+            .route("/ws", get(ws_handler))
+            .with_state((tx_rpc, tx_ws_clone));
+            
+        if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:9090").await {
+            info!("Server listening on 0.0.0.0:9090 (prom, rpc, ws)");
+            let _ = axum::serve(listener, app).await;
+        } else {
+            warn!("Failed to bind metrics server to 0.0.0.0:9090");
+        }
+    });
+
     let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/ebpf-node"
     )))?;
 
-    // Initialize eBPF logger
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         warn!("failed to initialize eBPF logger: {e}");
     }
 
-    // Attach XDP program
     let xdp_program: &mut Xdp = ebpf.program_mut("ebpf_node").unwrap().try_into()?;
     xdp_program.load()?;
     if let Err(e) = xdp_program.attach(&opt.iface, XdpFlags::default()) {
         warn!("Failed to attach XDP program, continuing: {}", e);
     }
 
-    // Attach Kprobes for latency observability
     let kprobe_in: &mut KProbe = ebpf.program_mut("netif_receive_skb").unwrap().try_into()?;
     kprobe_in.load()?;
     if let Err(e) = kprobe_in.attach("netif_receive_skb", 0) {
@@ -143,7 +205,6 @@ async fn main() -> anyhow::Result<()> {
         warn!("Failed to attach KProbe out, continuing: {}", e);
     }
 
-    // Setup libp2p
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
@@ -200,27 +261,19 @@ async fn main() -> anyhow::Result<()> {
         swarm.listen_on(addr.clone())?;
     }
 
+    // Subscribe to Gossip topic
+    let topic = gossipsub::IdentTopic::new("gossip");
+    let _ = swarm.behaviour_mut().gossipsub.subscribe(&topic);
+
     info!("Local Peer ID: {}", swarm.local_peer_id());
     let _ = std::fs::write("/tmp/peer_id.txt", swarm.local_peer_id().to_string());
 
-    // Dial bootstrap peers
     for addr in &opt.bootstrap_peers {
         info!("Dialing bootstrap peer: {}", addr);
         if let Err(e) = swarm.dial(addr.clone()) {
             warn!("Failed to dial {}: {}", addr, e);
         }
     }
-
-    // Spawn Prometheus metrics server
-    tokio::spawn(async move {
-        let app = Router::new().route("/metrics", get(metrics_handler));
-        if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:9090").await {
-            info!("Prometheus metrics server listening on 0.0.0.0:9090/metrics");
-            let _ = axum::serve(listener, app).await;
-        } else {
-            warn!("Failed to bind metrics server to 0.0.0.0:9090");
-        }
-    });
 
     let mut stats_interval = time::interval(Duration::from_secs(10));
 
@@ -229,7 +282,6 @@ async fn main() -> anyhow::Result<()> {
         tokio::select! {
             _ = stats_interval.tick() => {
                 UPTIME.inc();
-                // Get map reference locally to avoid long-lived borrow of ebpf
                 if let Ok(latency_stats) = HashMap::<_, u64, u64>::try_from(ebpf.map("LATENCY_STATS").unwrap()) {
                     for i in 0..64 {
                         if let Ok(count) = latency_stats.get(&i, 0) {
@@ -238,27 +290,58 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            Some(tx) = rx_rpc.recv() => {
+                info!("Received RPC Tx: {:?}", tx);
+                let msg = NetworkMessage::TxProposal(tx);
+                if let Ok(payload) = serde_json::to_vec(&msg) {
+                    if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), payload) {
+                        warn!("Failed to publish via RPC: {:?}", e);
+                    }
+                }
+            }
             event = swarm.select_next_some() => match event {
                 SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                     propagation_source,
-                    message_id,
+                    message_id: _,
                     message,
                 })) => {
                     MESSAGES_RECEIVED.with_label_values(&["gossip"]).inc();
                     let sender = propagation_source.to_string();
                     PACKETS_TRACE.with_label_values(&[&sender, "gossip"]).inc();
-                    info!("Got message: '{}' with id: {} from peer: {}",
-                        String::from_utf8_lossy(&message.data), message_id, propagation_source);
 
-                    if message.data.starts_with(b"ATTACK") {
-                        warn!("Malicious message detected from peer {}. Blocking IP.", propagation_source);
-
-                        // Simulation of blocking an IP (1.2.3.4)
+                    if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&message.data) {
+                        match net_msg {
+                            NetworkMessage::TxProposal(tx) => {
+                                info!("Gossip TxProposal from {}: {:?}", sender, tx);
+                                // Solana-like Consensus: Validate & Vote via Gossip
+                                let vote = NetworkMessage::Vote { 
+                                    tx_id: tx.id.clone(), 
+                                    peer_id: swarm.local_peer_id().to_string() 
+                                };
+                                if let Ok(payload) = serde_json::to_vec(&vote) {
+                                    let _ = swarm.behaviour_mut().gossipsub.publish(topic.clone(), payload);
+                                }
+                            }
+                            NetworkMessage::Vote { tx_id, peer_id } => {
+                                info!("Gossip Vote for {} from {}", tx_id, peer_id);
+                                // Consensus Approved: Store in RocksDB and Emit via WS
+                                let approval_val = format!("Approved by {}", peer_id);
+                                let _ = db.put(tx_id.as_bytes(), approval_val.as_bytes());
+                                
+                                let alert = serde_json::json!({
+                                    "event": "BlockApproved",
+                                    "tx_id": tx_id,
+                                    "voter": peer_id
+                                }).to_string();
+                                let _ = tx_ws.send(alert);
+                            }
+                        }
+                    } else if message.data.starts_with(b"ATTACK") {
+                        warn!("Malicious message detected from peer {}. Blocking IP.", sender);
                         let ip_to_block = Ipv4Addr::new(1, 2, 3, 4);
                         let ip_u32 = u32::from_be_bytes(ip_to_block.octets());
                         let key = Key::new(32, ip_u32);
 
-                        // Get map reference locally as LpmTrie
                         if let Ok(mut blacklist) = LpmTrie::<_, u32, u32>::try_from(ebpf.map_mut("NODES_BLACKLIST").unwrap()) {
                             if let Err(e) = blacklist.insert(&key, 1, 0) {
                                 warn!("Failed to block IP: {}", e);
