@@ -1,34 +1,96 @@
-# eBPF Blockchain Project
+# eBPF Blockchain Lab: P2P Resilience & Consensus
 
-## Redefining Node Architecture through Kernel-Level Observability
+Este proyecto es un laboratorio de R+D enfocado en la creación de una red descentralizada de alto rendimiento que utiliza **eBPF (Extended Berkeley Packet Filter)** para seguridad y observabilidad nativa, y **libp2p** para una red P2P resiliente.
 
-### Executive Summary
-The eBPF Blockchain project is an R&D initiative focused on overcoming the performance and transparency limitations inherent in current decentralized network architectures. By integrating **libp2p** for P2P communication and **eBPF (Extended Berkeley Packet Filter)** for kernel-level management, we are transforming blockchain nodes from passive applications into active, self-monitoring, and self-healing systems.
+## 🚀 Pilares Arquitectónicos
 
-This architecture redefines the node as a high-performance entity that leverages OS-level primitives to ensure security, efficiency, and visibility at scale.
-
----
-
-### Core Architectural Pillars
-*   **libp2p (Networking):** Abstraction of the network layer using **QUIC** for low-latency transport and **Gossipsub v1.1** for efficient, secure block propagation.
-*   **eBPF (Kernel Integration):** Shared memory (eBPF Maps) between kernel and user space for real-time traffic control, latency metrics, and instant security enforcement (blacklist management) with near-zero overhead.
-*   **Security:** Native integration of fuzzing (AFL++) and dynamic security enforcement at the kernel level via XDP/TC programs.
+*   **libp2p Networking**: Implementación robusta de P2P utilizando `Gossipsub 1.1` para propagación de transacciones y `Identify/Request-Response` para sincronización de historial.
+*   **Consenso por Quórum**: Lógica de validación descentralizada que requiere una mayoría (2/3) de votos de los pares antes de confirmar una transacción en el ledger.
+*   **eBPF Security & Observability**: 
+    -   **XDP (eXpress Data Path)**: Filtrado de paquetes a nivel de kernel y blacklisting de IPs maliciosas a tasa de línea.
+    -   **KProbes**: Medición de latencia interna del stack TCP/IP del kernel mediante histogramas de potencia de 2.
+*   **Persistencia Aislada**: Almacenamiento persistente mediante **RocksDB** con rutas de datos únicas por contenedor para evitar colisiones de bloqueos en entornos compartidos.
+*   **Observabilidad Full-Stack**: Integración nativa con Prometheus (métricas), Loki (logs JSON estructurados) y Grafana.
 
 ---
 
-### Project Documentation
-This repository contains extensive documentation for both researchers and engineers. Use the following guide to navigate the knowledge base:
+## 📋 Requisitos Previos
 
-| Documentation File | Purpose | Target Audience |
-| :--- | :--- | :--- |
-| `docs/README.md` | Central index and entry point for all documentation. | Everyone |
-| `docs/QUICKSTART.md` | Step-by-step guide to launch a functional node in 5 minutes. | Engineers |
-| `docs/LAB-GUIDE.md` | Deep dive into architecture, P2P logic, and eBPF integration. | CTO / Technical Lead |
-| `docs/TUTORIAL-AYA.md` | Specific guide on using Aya-rs for eBPF development. | Rust Developers |
-| `lxc-install.md` | Infrastructure setup guide using LXC containers. | DevOps / SysAdmin |
-| `planing.md` | Current roadmap, task tracking, and future milestones. | Project Managers |
+Antes de iniciar, asegúrate de tener instalado en el host:
+1.  **LXD/LXC**: Para la orquestación de los nodos (contenedores).
+2.  **Docker & Docker Compose**: Para la pila de monitoreo (Grafana/Loki/Prometheus).
+3.  **Ansible**: Para la automatización del despliegue.
+4.  **Rust (Nightly)**: El nodo requiere Rust nightly para la compilación de los programas eBPF (Aya).
+
+```bash
+# Instalación rápida de dependencias (Ubuntu/Debian)
+sudo apt update && sudo apt install -y lxd docker-compose ansible
+```
 
 ---
 
-### Key Technical References
-For a complete understanding of the design philosophy, goals, and technical specifications, refer to the **RFC 001: Arquitectura de Blockchain con Observabilidad Nativa (eBPF) y Networking P2P (libp2p)** document within the internal project wiki.
+## 🛠️ Cómo Iniciar el Sistema
+
+### 1. Despliegue Inicial del Clúster
+Este comando crea la red de bridge, los perfiles de LXC y despliega 3 nodos iniciales.
+```bash
+cd ansible
+ansible-playbook playbooks/deploy_cluster.yml -K
+```
+
+### 2. Reparación y Reinicio Rápido
+Si realizas cambios en el código de Rust o necesitas limpiar bloqueos de base de datos:
+```bash
+ansible-playbook playbooks/repair_and_restart.yml
+```
+
+---
+
+## 🔍 Simulación y Monitoreo
+
+### Generación de Carga
+Para simular transacciones y ver el consenso en tiempo real, utiliza la herramienta de simulación:
+```bash
+cd tools/ebpf-simulation
+cargo run
+```
+
+### Visualización de Datos
+Accede a los dashboards de monitoreo en tu navegador:
+- **Grafana**: [http://localhost:3000](http://localhost:3000) (User/Pass: `admin`/`admin`)
+- **Prometheus**: [http://localhost:9090](http://localhost:9090)
+- **Loki Explorer**: Disponible dentro de Grafana para inspeccionar logs P2P.
+
+---
+
+## 🐞 Depuración y Análisis
+
+-   **Logs de los Nodos**: Los logs de cada nodo se redirigen en el host a `/tmp/ebpf-node-X.log`.
+-   **Inspección eBPF**: Puedes verificar los mapas de eBPF (latencia/blacklist) usando `bpftool` dentro de los contenedores:
+    ```bash
+    lxc exec ebpf-node-1 -- bpftool map dump name LATENCY_STATS
+    ```
+-   **Estado de RocksDB**: Los datos persistentes se encuentran en `/root/ebpf-blockchain/data/<hostname>`.
+
+```bash
+# Inspeccionar RocksDB
+lxc exec ebpf-node-1 -- bash -ic "rocksdb-inspect scan"
+```
+
+---
+
+## 📚 Documentación de Referencia
+
+Durante el desarrollo se han creado documentos detallados sobre componentes específicos:
+
+| Documento | Descripción |
+| :--- | :--- |
+| [AUDIT_ANALYSIS.md](./AUDIT_ANALYSIS.md) | Análisis profundo de fallas de consenso y seguridad. |
+| [P2P_OBSERVABILITY_REPORT.md](./P2P_OBSERVABILITY_REPORT.md) | Reporte de métricas y propagación del protocolo. |
+| [RESOLUCION_LAB.md](./RESOLUCION_LAB.md) | Guía de resolución de problemas de red y bridge. |
+| [RPC_DOCUMENTATION.md](./RPC_DOCUMENTATION.md) | Detalle de la interfaz de comunicaciones del nodo. |
+
+---
+
+> [!IMPORTANT]
+> El proyecto utiliza una configuración de quórum de 2 nodos. Si el clúster tiene menos de 2 nodos activos, las transacciones permanecerán en estado pendiente y no se confirmarán en la base de datos.
