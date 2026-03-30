@@ -5,7 +5,7 @@ use aya_ebpf::{
     bindings::{BPF_F_NO_PREALLOC, xdp_action},
     helpers::bpf_ktime_get_ns,
     macros::{kprobe, map, xdp},
-    maps::HashMap,
+    maps::{HashMap, LruHashMap},
     maps::lpm_trie::{Key, LpmTrie},
     programs::{ProbeContext, XdpContext},
 };
@@ -25,7 +25,7 @@ static LATENCY_STATS: HashMap<u64, u64> = HashMap::with_max_entries(64, 0);
 
 /// Temporary storage for packet start times, keyed by the skb pointer address.
 #[map]
-static START_TIMES: HashMap<u64, u64> = HashMap::with_max_entries(10240, 0);
+static START_TIMES: LruHashMap<u64, u64> = LruHashMap::with_max_entries(10240, 0);
 
 #[xdp]
 pub fn ebpf_node(ctx: XdpContext) -> u32 {
