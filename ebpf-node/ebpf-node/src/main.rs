@@ -175,9 +175,11 @@ async fn main() -> anyhow::Result<()> {
         debug!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    // Initialize RocksDB
-    let db_path = format!("/tmp/rocksdb_{}", std::process::id());
+    // Initialize RocksDB in a unique persistent path per node
+    let hostname = std::fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "unknown".to_string()).trim().to_string();
+    let db_path = format!("/root/ebpf-blockchain/data/{}", hostname);
     info!("Initializing RocksDB at {}", db_path);
+    std::fs::create_dir_all(&db_path).unwrap();
     let db = Arc::new(DB::open_default(&db_path).unwrap());
 
     // Setup Tokio async channels for Axum-Swarm communication
@@ -370,16 +372,33 @@ async fn main() -> anyhow::Result<()> {
                                     voter = %peer_id,
                                     "Consensus Vote Received"
                                 );
-                                // Consensus Approved: Store in RocksDB and Emit via WS
-                                let approval_val = format!("Approved by {}", peer_id);
-                                let _ = db.put(tx_id.as_bytes(), approval_val.as_bytes());
                                 
-                                let alert = serde_json::json!({
-                                    "event": "BlockApproved",
-                                    "tx_id": tx_id,
-                                    "voter": peer_id
-                                }).to_string();
-                                let _ = tx_ws.send(alert);
+                                // Quorum Logic: Retrieve current state and add voter
+                                let mut voters = std::collections::HashSet::new();
+                                if let Ok(Some(existing)) = db.get(tx_id.as_bytes()) {
+                                    if let Ok(existing_str) = String::from_utf8(existing.to_vec()) {
+                                        if let Ok(existing_voters) = serde_json::from_str::<std::collections::HashSet<String>>(&existing_str) {
+                                            voters = existing_voters;
+                                        }
+                                    }
+                                }
+                                
+                                if voters.insert(peer_id.clone()) {
+                                    if let Ok(voters_json) = serde_json::to_string(&voters) {
+                                        let _ = db.put(tx_id.as_bytes(), voters_json.as_bytes());
+                                        
+                                        // QUORUM THRESHOLD: 2/3 (or 2 for a 3-node lab)
+                                        if voters.len() == 2 {
+                                            info!(event = "quorum_reached", tx_id = %tx_id, "Quorum reached! Transaction confirmed.");
+                                            let alert = serde_json::json!({
+                                                "event": "BlockConfirmed",
+                                                "tx_id": tx_id,
+                                                "voters": voters
+                                            }).to_string();
+                                            let _ = tx_ws.send(alert);
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else if message.data.starts_with(b"ATTACK") {
