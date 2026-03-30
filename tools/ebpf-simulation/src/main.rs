@@ -13,7 +13,7 @@ struct Transaction {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let node_ip = std::env::var("NODE_IP").unwrap_or_else(|_| "192.168.2.11".to_string());
+    let node_ip = std::env::var("NODE_IP").unwrap_or_else(|_| "192.168.2.13".to_string());
     let rpc_url = format!("http://{}:9090/rpc", node_ip);
     let ws_url = format!("ws://{}:9090/ws", node_ip);
 
@@ -33,12 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 while let Some(msg) = ws_stream.next().await {
                     match msg {
                         Ok(Message::Text(text)) => {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                                println!("🔔 CONSENSUS: Tx {} approved by peer {}", 
-                                    json["tx_id"], json["voter"]);
-                            } else {
-                                println!("📩 Raw WS Message: {}", text);
-                            }
+                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    if json["event"] == "BlockConfirmed" {
+                                        println!("🔔 CONSENSUS: Tx \"{}\" confirmed by Quorum! Voters: {}", 
+                                            json["tx_id"], json["voters"]);
+                                    } else {
+                                        println!("📩 Other Event: {} | Data: {}", json["event"], text);
+                                    }
+                                } else {
+                                    println!("📩 Raw WS Message: {}", text);
+                                }
                         }
                         Ok(_) => (),
                         Err(e) => {
