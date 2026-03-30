@@ -1,0 +1,44 @@
+---
+- name: Repair and Clean Start eBPF Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  vars:
+    num_nodes: 3
+    base_ip: "192.168.2"
+
+  tasks:
+    - name: Force kill all ebpf-node processes
+      shell: "lxc exec ebpf-node-{{ item }} -- pkill -9 ebpf-node || true"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Remove stale RocksDB locks
+      shell: "lxc exec ebpf-node-{{ item }} -- rm -f /root/ebpf-blockchain/data/LOCK"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Start Master Node (Node 1)
+      shell: |
+        nohup lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && ./target/release/ebpf-node --iface eth0 --listen-addresses /ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1" > /tmp/ebpf-node-1.log 2>&1 &
+
+    - name: Wait for Node 1
+      pause:
+        seconds: 5
+
+    - name: Extract Peer ID from Node 1
+      shell: "lxc exec ebpf-node-1 -- cat /tmp/peer_id.txt | tr -d '\r\n'"
+      register: node1_peer_id
+
+    - name: Start Slave Nodes (Node 2 and 3)
+      shell: |
+        nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && ./target/release/ebpf-node --iface eth0 --listen-addresses /ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1 --bootstrap-peers /ip4/{{ base_ip }}.11/tcp/50000/p2p/{{ node1_peer_id.stdout }}" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
+      loop: [2, 3]
+
+    - name: Final Connectivity Check
+      shell: "curl -s --connect-timeout 2 http://{{ base_ip }}.{{ 10 + item }}:9090/metrics | head -n 1"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      register: final_check
+      retries: 5
+      delay: 5
+      until: final_check.rc == 0

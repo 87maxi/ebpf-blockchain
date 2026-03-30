@@ -43,6 +43,21 @@
       shell: |
         lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && cargo build --release"
 
+    - name: Create data directory on all nodes
+      shell: "lxc exec ebpf-node-{{ item }} -- mkdir -p /root/ebpf-blockchain/data"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Pull binary from Node 1 to host
+      shell: "lxc file pull ebpf-node-1/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node /tmp/ebpf-node"
+
+    - name: Distribute binary to Slave Nodes
+      shell: "lxc file push /tmp/ebpf-node ebpf-node-{{ item }}/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node"
+      loop: [2, 3]
+
+    - name: Ensure binary is executable on all nodes
+      shell: "lxc exec ebpf-node-{{ item }} -- chmod +x /root/ebpf-blockchain/ebpf-node/target/release/ebpf-node"
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
     - name: Kill running eBPF nodes
       shell: "lxc exec ebpf-node-{{ item }} -- killall ebpf-node 2>/dev/null || true"
       loop: "{{ range(1, num_nodes | int + 1) | list }}"

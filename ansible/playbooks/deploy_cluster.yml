@@ -97,7 +97,7 @@
             build-essential clang llvm libelf-dev libbpf-dev curl git make \
             bpfcc-tools bpftrace linux-tools-generic \
               netperf iperf3 tcpdump wireshark-common strace ltrace gdb \
-            python3 python3-pip pahole
+            python3 python3-pip pahole rocksdb-tools
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
 
@@ -120,6 +120,13 @@
     - name: Mount project
       shell: |
         lxc config device add ebpf-node-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
+      loop: "{{ range(1, num_nodes | int + 1) | list }}"
+
+    - name: Configure RocksDB inspection alias
+      shell: |
+        lxc exec ebpf-node-{{ item }} -- bash -c "
+          grep -q 'rocksdb-inspect' /root/.bashrc || echo \"alias rocksdb-inspect='ldb --db=/root/ebpf-blockchain/data/\$(hostname)'\" >> /root/.bashrc
+        "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
 
     - name: Detach any existing XDP programs
