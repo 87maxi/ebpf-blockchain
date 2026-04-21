@@ -1,96 +1,459 @@
-# eBPF Blockchain Lab: P2P Resilience & Consensus
+# eBPF Blockchain
 
-Este proyecto es un laboratorio de R+D enfocado en la creación de una red descentralizada de alto rendimiento que utiliza **eBPF (Extended Berkeley Packet Filter)** para seguridad y observabilidad nativa, y **libp2p** para una red P2P resiliente.
+![CI/CD Pipeline](https://github.com/ebpf-blockchain/ebpf-blockchain/workflows/CI/CD%20Pipeline/badge.svg)
+![Rust](https://img.shields.io/badge/rust-nightly-orange.svg)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-## 🚀 Pilares Arquitectónicos
+## 📋 Table of Contents
 
-*   **libp2p Networking**: Implementación robusta de P2P utilizando `Gossipsub 1.1` para propagación de transacciones y `Identify/Request-Response` para sincronización de historial.
-*   **Consenso por Quórum**: Lógica de validación descentralizada que requiere una mayoría (2/3) de votos de los pares antes de confirmar una transacción en el ledger.
-*   **eBPF Security & Observability**: 
-    -   **XDP (eXpress Data Path)**: Filtrado de paquetes a nivel de kernel y blacklisting de IPs maliciosas a tasa de línea.
-    -   **KProbes**: Medición de latencia interna del stack TCP/IP del kernel mediante histogramas de potencia de 2.
-*   **Persistencia Aislada**: Almacenamiento persistente mediante **RocksDB** con rutas de datos únicas por contenedor para evitar colisiones de bloqueos en entornos compartidos.
-*   **Observabilidad Full-Stack**: Integración nativa con Prometheus (métricas), Loki (logs JSON estructurados) y Grafana.
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [API Documentation](#api-documentation)
+- [Observability](#observability)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [Project Structure](#project-structure)
+- [Archive](#archive)
+- [License](#license)
 
----
+## Overview
 
-## 📋 Requisitos Previos
+[eBPF Blockchain](https://github.com/ebpf-blockchain/ebpf-blockchain) is an experimental blockchain system implemented in Rust that combines:
 
-Antes de iniciar, asegúrate de tener instalado en el host:
-1.  **LXD/LXC**: Para la orquestación de los nodos (contenedores).
-2.  **Docker & Docker Compose**: Para la pila de monitoreo (Grafana/Loki/Prometheus).
-3.  **Ansible**: Para la automatización del despliegue.
-4.  **Rust (Nightly)**: El nodo requiere Rust nightly para la compilación de los programas eBPF (Aya).
+- **eBPF** for kernel-level network observability and security
+- **libp2p** for decentralized P2P networking (Gossipsub 1.1)
+- **Rust** for memory safety and high performance
+- **RocksDB** for persistent data storage
+- **Prometheus + Grafana + Loki** for complete observability
 
-```bash
-# Instalación rápida de dependencias (Ubuntu/Debian)
-sudo apt update && sudo apt install -y lxd docker-compose ansible
+This POC demonstrates how eBPF capabilities can be integrated with blockchain decentralization to create a robust, secure, and highly observable distributed system.
+
+## Features
+
+### Security
+- ✅ **eBPF XDP Filtering** - Proactive IP blocking at kernel level
+- ✅ **Replay Protection** - Nonce-based transaction deduplication
+- ✅ **Sybil Protection** - Peer connection limits per IP
+- ✅ **Whitelist XDP** - Preventive IP blocking
+- ✅ **KProbes & Tracepoints** - Kernel-level monitoring
+
+### Consensus & Networking
+- ✅ **Proof of Stake** - Consensus mechanism with 2/3 quorum
+- ✅ **P2P Networking** - libp2p with Gossipsub 1.1
+- ✅ **mDNS Discovery** - Automatic peer discovery
+- ✅ **QUIC Transport** - Secure, low-latency communication
+
+### Observability
+- ✅ **Prometheus Metrics** - Network, consensus, transaction, eBPF, system metrics
+- ✅ **Grafana Dashboards** - Health overview, network P2P, consensus, transactions
+- ✅ **Structured Logging** - JSON format logs with Loki integration
+- ✅ **Alerts** - Prometheus alerting rules
+
+### Automation
+- ✅ **CI/CD Pipeline** - GitHub Actions with 6 stages
+- ✅ **Ansible Playbooks** - Deploy, rollback, health check, backup, disaster recovery
+- ✅ **Automated Backups** - With retention policy and integrity verification
+- ✅ **Disaster Recovery** - 6-phase recovery process
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      CLIENT/USER                                │
+│                    (CLI / Web Interface)                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        USER SPACE                               │
+│  ┌───────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│  │    P2P        │  │   CONSENSUS     │  │    STORAGE      │   │
+│  │  Networking   │  │  Mechanism      │  │   (RocksDB)     │   │
+│  │  (libp2p)     │  │  (PoS 2/3)      │  │                 │   │
+│  └───────────────┘  └─────────────────┘  └─────────────────┘   │
+│           │                │                  │             │
+│           ▼                ▼                  ▼             │
+│    ┌───────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│    │   METRICS     │  │   SECURITY      │  │    API          │   │
+│    │ (Prometheus)  │  │  (Detector)     │  │   (Axum)        │   │
+│    └───────────────┘  └─────────────────┘  └─────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       KERNEL SPACE (eBPF)                       │
+│  ┌───────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│  │    XDP        │  │    KPROBES      │  │   TRACEPOINTS   │   │
+│  │  Filtering    │  │  Latency        │  │   Monitoring    │   │
+│  │  (Security)   │  │  (Monitoring)   │  │  (Security)     │   │
+│  └───────────────┘  └─────────────────┘  └─────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
----
+For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 🛠️ Cómo Iniciar el Sistema
+## Quick Start
 
-### 1. Despliegue Inicial del Clúster
-Este comando crea la red de bridge, los perfiles de LXC y despliega 3 nodos iniciales.
-```bash
-cd ansible
-ansible-playbook playbooks/deploy_cluster.yml -K
-```
+### Prerequisites
 
-### 2. Reparación y Reinicio Rápido
-Si realizas cambios en el código de Rust o necesitas limpiar bloqueos de base de datos:
-```bash
-ansible-playbook playbooks/repair_and_restart.yml
-```
+- **Linux Kernel** ≥ 5.10 with BTF enabled
+- **Rust Nightly** (latest)
+- **Docker** ≥ 20.10 (for monitoring stack)
+- **Ansible** ≥ 2.12 (for deployment)
 
----
-
-## 🔍 Simulación y Monitoreo
-
-### Generación de Carga
-Para simular transacciones y ver el consenso en tiempo real, utiliza la herramienta de simulación:
-```bash
-cd tools/ebpf-simulation
-cargo run
-```
-
-### Visualización de Datos
-Accede a los dashboards de monitoreo en tu navegador:
-- **Grafana**: [http://localhost:3000](http://localhost:3000) (User/Pass: `admin`/`admin`)
-- **Prometheus**: [http://localhost:9090](http://localhost:9090)
-- **Loki Explorer**: Disponible dentro de Grafana para inspeccionar logs P2P.
-
----
-
-## 🐞 Depuración y Análisis
-
--   **Logs de los Nodos**: Los logs de cada nodo se redirigen en el host a `/tmp/ebpf-node-X.log`.
--   **Inspección eBPF**: Puedes verificar los mapas de eBPF (latencia/blacklist) usando `bpftool` dentro de los contenedores:
-    ```bash
-    lxc exec ebpf-node-1 -- bpftool map dump name LATENCY_STATS
-    ```
--   **Estado de RocksDB**: Los datos persistentes se encuentran en `/root/ebpf-blockchain/data/<hostname>`.
+### Build and Run
 
 ```bash
-# Inspeccionar RocksDB
-lxc exec ebpf-node-1 -- bash -ic "rocksdb-inspect scan"
+# Clone the repository
+git clone https://github.com/ebpf-blockchain/ebpf-blockchain.git
+cd ebpf-blockchain
+
+# Build the node
+cd ebpf-node
+cargo build --release
+
+# Run the node
+./target/release/ebpf-node
 ```
 
----
+### Start Monitoring Stack
 
-## 📚 Documentación de Referencia
+```bash
+# From the monitoring directory
+cd monitoring
 
-Durante el desarrollo se han creado documentos detallados sobre componentes específicos:
+# Start all services
+docker-compose up -d
 
-| Documento | Descripción |
-| :--- | :--- |
-| [AUDIT_ANALYSIS.md](./AUDIT_ANALYSIS.md) | Análisis profundo de fallas de consenso y seguridad. |
-| [P2P_OBSERVABILITY_REPORT.md](./P2P_OBSERVABILITY_REPORT.md) | Reporte de métricas y propagación del protocolo. |
-| [RESOLUCION_LAB.md](./RESOLUCION_LAB.md) | Guía de resolución de problemas de red y bridge. |
-| [RPC_DOCUMENTATION.md](./RPC_DOCUMENTATION.md) | Detalle de la interfaz de comunicaciones del nodo. |
+# Access Grafana at http://localhost:3000
+# Default credentials: admin/admin
+```
 
----
+## Installation
 
-> [!IMPORTANT]
-> El proyecto utiliza una configuración de quórum de 2 nodos. Si el clúster tiene menos de 2 nodos activos, las transacciones permanecerán en estado pendiente y no se confirmarán en la base de datos.
+### From Source
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Clone and build
+git clone https://github.com/ebpf-blockchain/ebpf-blockchain.git
+cd ebpf-blockchain/ebpf-node
+cargo build --release
+
+# Install binary
+sudo cp target/release/ebpf-node /usr/local/bin/
+```
+
+### Deploy with Ansible
+
+```bash
+# Configure inventory
+cp ansible/inventory/hosts.yml.example ansible/inventory/hosts.yml
+# Edit ansible/inventory/hosts.yml with your server details
+
+# Run deployment
+ansible-playbook ansible/playbooks/deploy.yml -i ansible/inventory/hosts.yml
+```
+
+### System Requirements
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 2 cores | 4+ cores |
+| RAM | 4 GB | 8+ GB |
+| Storage | 20 GB | 50+ GB SSD |
+| Network | 100 Mbps | 1 Gbps |
+| Kernel | 5.10 (with BTF) | 6.1+ (with BTF) |
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Node configuration
+export DATA_DIR="/var/lib/ebpf-blockchain/data"
+export NETWORK_P2P_PORT=9000
+export NETWORK_QUIC_PORT=9001
+export METRICS_PORT=9090
+export RPC_PORT=9091
+export WS_PORT=9092
+
+# Security
+export SECURITY_MODE="strict"
+export REPLAY_PROTECTION="true"
+export SYBIL_PROTECTION="true"
+
+# Logging
+export LOG_LEVEL="info"
+export LOG_FORMAT="json"
+
+# Bootstrap peers
+export BOOTSTRAP_PEERS="/ip4/192.168.1.100/tcp/9000"
+```
+
+### Configuration File
+
+```toml
+# config/config.toml
+[consensus]
+mode = "proof_of_stake"
+minimum_stake = 10000
+validator_timeout_ms = 5000
+
+[storage]
+path = "/var/lib/ebpf-blockchain/data"
+cache_size_mb = 1024
+
+[network]
+p2p_port = 9000
+quic_port = 9001
+max_connections = 100
+
+[security]
+mode = "strict"
+replay_protection = true
+sybil_protection = true
+blacklist_enabled = true
+
+[metrics]
+enabled = true
+port = 9090
+
+[logging]
+level = "info"
+format = "json"
+```
+
+## Usage
+
+### Command Line Interface
+
+```bash
+# Start node
+ebpf-node --config config/config.toml
+
+# View node information
+curl http://localhost:9091/api/v1/node/info
+
+# View connected peers
+curl http://localhost:9091/api/v1/network/peers
+
+# Submit transaction
+curl -X POST http://localhost:9091/api/v1/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"id": "tx-001", "data": "hello", "nonce": 1}'
+
+# View metrics
+curl http://localhost:9090/metrics
+```
+
+### Backup and Restore
+
+```bash
+# Create backup
+/var/lib/ebpf-blockchain/bin/backup.sh
+
+# Restore from backup
+/var/lib/ebpf-blockchain/bin/restore.sh /path/to/backup.tar.gz --force
+
+# List recent backups
+ls -la /var/lib/ebpf-blockchain/backups/
+```
+
+## API Documentation
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/node/info` | Node information |
+| GET | `/api/v1/network/peers` | Connected peers list |
+| POST | `/api/v1/transactions` | Create transaction |
+| GET | `/api/v1/blocks/{height}` | Get block by height |
+| GET | `/metrics` | Prometheus metrics |
+| GET | `/health` | Health check |
+| GET | `/ws` | WebSocket connection |
+
+For complete API documentation, see [docs/API.md](docs/API.md) and [docs/openapi.yml](docs/openapi.yml).
+
+## Observability
+
+### Grafana Dashboards
+
+| Dashboard | URL | Description |
+|-----------|-----|-------------|
+| Health Overview | `http://localhost:3000/health` | System health status |
+| Network P2P | `http://localhost:3000/network` | P2P network metrics |
+| Consensus | `http://localhost:3000/consensus` | Consensus metrics |
+| Transactions | `http://localhost:3000/transactions` | Transaction metrics |
+
+### Prometheus Alerts
+
+Alerts are configured in [monitoring/prometheus/alerts.yml](monitoring/prometheus/alerts.yml):
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| NodeDown | Service stopped | Critical |
+| HighCPUUsage | CPU > 80% | Warning |
+| LowPeerCount | Peers < 3 | Warning |
+| HighLatency | Latency > 100ms | Warning |
+| DiskSpaceLow | Disk > 90% | Critical |
+
+### Structured Logs
+
+Logs are emitted in JSON format for Loki ingestion:
+
+```json
+{
+  "timestamp": "2026-04-21T10:00:00Z",
+  "level": "INFO",
+  "component": "consensus",
+  "message": "Block proposed",
+  "block_height": 42,
+  "peer_id": "12D3Koo..."
+}
+```
+
+## Deployment
+
+### Ansible Playbooks
+
+| Playbook | Description | Usage |
+|----------|-------------|-------|
+| `deploy.yml` | Deploy node with rollback | `ansible-playbook ansible/playbooks/deploy.yml` |
+| `rollback.yml` | Rollback to previous version | `ansible-playbook ansible/playbooks/rollback.yml` |
+| `health_check.yml` | Post-deployment health check | `ansible-playbook ansible/playbooks/health_check.yml` |
+| `backup.yml` | Execute backup | `ansible-playbook ansible/playbooks/backup.yml` |
+| `disaster_recovery.yml` | Full disaster recovery | `ansible-playbook ansible/playbooks/disaster_recovery.yml` |
+
+### CI/CD Pipeline
+
+The project uses GitHub Actions with 6 stages:
+
+1. **Lint** - cargo fmt, clippy, security audit
+2. **Test** - Unit and integration tests
+3. **Build** - Release binary, package creation
+4. **Deploy Staging** - Auto-deploy to staging (develop branch)
+5. **Deploy Production** - Auto-deploy to production (main branch)
+6. **Backup Verification** - Verify backup scripts
+
+## Contributing
+
+Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for details on how to contribute to this project.
+
+### Quick Contribution Steps
+
+```bash
+# 1. Fork the repository
+# 2. Create a feature branch
+git checkout -b feature/my-feature
+
+# 3. Make changes
+# 4. Run tests
+cargo test
+
+# 5. Run linter
+cargo fmt
+cargo clippy --all-targets
+
+# 6. Commit and push
+git commit -m "feat: add my feature"
+git push origin feature/my-feature
+
+# 7. Open a Pull Request
+```
+
+## License
+
+This project is licensed under the MIT License - see the [MIT-LICENSE](ebpf-node/LICENSE-MIT) file for details.
+
+## Project Status
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Fase 1: Security | ✅ Complete | Replay protection, Sybil protection, XDP whitelist |
+| Fase 2: Observability | ✅ Complete | Prometheus, Grafana, Loki, structured logging |
+| Fase 3: Automation | ✅ Complete | CI/CD, Ansible, backups, disaster recovery |
+| Fase 4: Documentation | ✅ Complete | ADRs, API docs, Architecture, Operations, Deployment, Contributing |
+
+## Project Structure
+
+```
+ebpf-blockchain/
+├── README.md                    # This file (project overview)
+├── docs/                        # Active documentation (implemented)
+│   ├── ARCHITECTURE.md          # System architecture & design
+│   ├── API.md                   # REST API documentation
+│   ├── CONTRIBUTING.md          # Contribution guidelines
+│   ├── DEPLOYMENT.md            # Deployment procedures
+│   ├── OPERATIONS.md            # Operations runbook
+│   ├── openapi.yml              # OpenAPI 3.0.3 specification
+│   └── adr/                     # Architecture Decision Records
+│       ├── 001-rust-implementation.md
+│       ├── 002-consensus-algorithm.md
+│       ├── 003-ebpf-for-security.md
+│       ├── 004-rocksdb-storage.md
+│       ├── 005-libp2p-networking.md
+│       └── 006-observability-stack.md
+├── archive/                     # Historical/archived documentation
+│   ├── README.md                # Archive organization guide
+│   ├── plans/                   # Implementation plans (completed)
+│   ├── specs/                   # Technical specifications (implemented)
+│   ├── legacy/                  # Obsolete documentation
+│   └── references/              # Reference materials
+├── ebpf-node/                   # Rust node implementation
+│   ├── ebpf-node/               # User space (libp2p, API, metrics)
+│   ├── ebpf-node-ebpf/          # Kernel space (eBPF programs)
+│   └── ebpf-node-common/        # Shared code
+├── ansible/                     # Deployment automation
+│   ├── playbooks/               # Deploy, rollback, health check
+│   ├── roles/                   # Ansible roles
+│   └── inventory/               # Host configuration
+├── monitoring/                  # Observability stack
+│   ├── prometheus/              # Metrics collection & alerts
+│   ├── grafana/                 # Dashboards
+│   ├── loki/                    # Log aggregation
+│   ├── tempo/                   # Distributed tracing
+│   └── promtail/                # Log shipping
+├── scripts/                     # Utility scripts
+├── tests/                       # Integration tests
+└── tools/                       # Development tools
+```
+
+## Archive
+
+The [`archive/`](archive/) directory contains historical documentation that has been superseded by the active documentation in [`docs/`](docs/). See [`archive/README.md`](archive/README.md) for:
+
+- **What was archived and why**
+- **Justification for implementation decisions** (eBPF, Rust, PoS, etc.)
+- **Where to find information** that was moved from obsolete documents
+
+| Archive Subdirectory | Contents |
+|---------------------|----------|
+| [`archive/plans/`](archive/plans/) | Implementation plans and phase summaries |
+| [`archive/specs/`](archive/specs/) | Technical specifications by phase |
+| [`archive/legacy/`](archive/legacy/) | Obsolete documentation replaced by active docs |
+| [`archive/references/`](archive/references/) | Reference materials (RFC, tutorials, configs) |
+
+## Contact
+
+- **Project Documentation**: [docs/](docs/)
+- **Issue Tracker**: [GitHub Issues](https://github.com/ebpf-blockchain/ebpf-blockchain/issues)
+- **Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Archive**: [archive/README.md](archive/README.md)
+
+## Acknowledgments
+
+- **Aya** - eBPF framework for Rust
+- **libp2p** - P2P networking library
+- **Tokio** - Async runtime
+- **RocksDB** - Embedded database
+- **Prometheus & Grafana** - Observability stack
