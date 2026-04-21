@@ -1,0 +1,777 @@
+openapi: 3.0.3
+info:
+  title: eBPF Blockchain API
+  description: |
+    API for interacting with the eBPF Blockchain node.
+    
+    This API provides endpoints for:
+    - Node information and status
+    - P2P network management
+    - Transaction submission and querying
+    - Block retrieval
+    - Security management
+    - Health monitoring
+    
+    All endpoints return JSON responses unless otherwise specified.
+  version: 1.0.0
+  contact:
+    name: eBPF Blockchain Team
+    email: dev@ebpf-blockchain.example.com
+    url: https://github.com/ebpf-blockchain/ebpf-blockchain
+  license:
+    name: MIT License
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:9091
+    description: Development server
+  - url: https://api.staging.ebpf-blockchain.example.com
+    description: Staging server
+  - url: https://api.ebpf-blockchain.example.com
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Node
+    description: Node information and status
+  - name: Network
+    description: P2P network management
+  - name: Transactions
+    description: Transaction operations
+  - name: Blocks
+    description: Block operations
+  - name: Security
+    description: Security management
+  - name: Health
+    description: Health and monitoring
+
+paths:
+  /api/v1/node/info:
+    get:
+      summary: Get node information
+      description: Returns comprehensive information about the node including version, uptime, peer count, and consensus status.
+      operationId: getNodeInfo
+      tags:
+        - Node
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeInfo'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/network/peers:
+    get:
+      summary: Get list of connected peers
+      description: Returns a list of all currently connected peers with their details.
+      operationId: getPeers
+      tags:
+        - Network
+      parameters:
+        - name: transport
+          in: query
+          description: Filter by transport type
+          schema:
+            type: string
+            enum: [QUIC, TCP, all]
+            default: all
+        - name: validator
+          in: query
+          description: Filter by validator status
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeersResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/network/config:
+    get:
+      summary: Get network configuration
+      description: Returns the current network configuration.
+      operationId: getNetworkConfig
+      tags:
+        - Network
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkConfig'
+    put:
+      summary: Update network configuration
+      description: Updates the network configuration. Requires API key authentication.
+      operationId: updateNetworkConfig
+      tags:
+        - Network
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkConfigUpdate'
+      responses:
+        '200':
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/transactions:
+    post:
+      summary: Create new transaction
+      description: Submits a new transaction to the node. The transaction will be validated and propagated to peers.
+      operationId: createTransaction
+      tags:
+        - Transactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '201':
+          description: Transaction created and submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResult'
+        '400':
+          description: Invalid transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Replay detected (duplicate nonce)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/transactions/{txId}:
+    get:
+      summary: Get transaction by ID
+      description: Retrieves a transaction by its unique ID.
+      operationId: getTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: txId
+          in: path
+          required: true
+          description: Transaction ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/blocks/latest:
+    get:
+      summary: Get latest block
+      description: Returns the most recent block in the blockchain.
+      operationId: getLatestBlock
+      tags:
+        - Blocks
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Block'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/blocks/{height}:
+    get:
+      summary: Get block by height
+      description: Retrieves a block at the specified height.
+      operationId: getBlockByHeight
+      tags:
+        - Blocks
+      parameters:
+        - name: height
+          in: path
+          required: true
+          description: Block height
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: Block found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Block'
+        '404':
+          description: Block not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/security/blacklist:
+    get:
+      summary: Get IP blacklist
+      description: Returns the current IP blacklist used by XDP filtering.
+      operationId: getBlacklist
+      tags:
+        - Security
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlacklistResponse'
+    put:
+      summary: Modify blacklist
+      description: Adds or removes an IP from the blacklist. Requires API key authentication.
+      operationId: modifyBlacklist
+      tags:
+        - Security
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlacklistRequest'
+      responses:
+        '200':
+          description: Blacklist updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResponse'
+        '401':
+          description: Unauthorized
+
+  /api/v1/security/whitelist:
+    get:
+      summary: Get IP whitelist
+      description: Returns the current IP whitelist for trusted peers.
+      operationId: getWhitelist
+      tags:
+        - Security
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhitelistResponse'
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns the health status of the node and its components.
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Node is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Node is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Returns metrics in Prometheus exposition format.
+      operationId: prometheusMetrics
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Metrics in text/plain format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication (optional in development mode)
+
+  schemas:
+    NodeInfo:
+      type: object
+      properties:
+        node_id:
+          type: string
+          description: libp2p PeerId
+          example: "12D3KooWSamplePeerId123456789"
+        version:
+          type: string
+          description: Software version
+          example: "1.0.0"
+        uptime_seconds:
+          type: integer
+          format: int64
+          description: Seconds since node started
+          example: 3600
+        peers_connected:
+          type: integer
+          description: Number of connected peers
+          example: 5
+        blocks_proposed:
+          type: integer
+          format: int64
+          description: Total blocks proposed
+          example: 42
+        blocks_validated:
+          type: integer
+          format: int64
+          description: Total blocks validated
+          example: 128
+        transactions_processed:
+          type: integer
+          format: int64
+          description: Total transactions processed
+          example: 256
+        current_height:
+          type: integer
+          format: int64
+          description: Current blockchain height
+          example: 42
+        is_validator:
+          type: boolean
+          description: Whether this node is a validator
+          example: true
+        stake:
+          type: integer
+          format: int64
+          description: Node stake amount
+          example: 10000
+        reputation_score:
+          type: number
+          format: float
+          description: Reputation score (0.0 - 1.0)
+          example: 0.95
+
+    Peer:
+      type: object
+      properties:
+        peer_id:
+          type: string
+          description: libp2p PeerId
+          example: "12D3KooWSamplePeerId"
+        address:
+          type: string
+          description: Peer address
+          example: "/ip4/192.168.1.100/tcp/9000"
+        transport:
+          type: string
+          enum: [QUIC, TCP]
+          description: Transport protocol
+          example: "QUIC"
+        latency_ms:
+          type: number
+          format: float
+          description: Latency to peer in milliseconds
+          example: 5.2
+        reputation:
+          type: number
+          format: float
+          description: Peer reputation score
+          example: 0.95
+        is_validator:
+          type: boolean
+          description: Whether peer is a validator
+          example: true
+        connected_since:
+          type: string
+          format: date-time
+          description: Connection start time
+          example: "2026-04-21T08:00:00Z"
+        messages_sent:
+          type: integer
+          format: int64
+          description: Messages sent to peer
+          example: 128
+        messages_received:
+          type: integer
+          format: int64
+          description: Messages received from peer
+          example: 256
+
+    PeersResponse:
+      type: object
+      properties:
+        peers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Peer'
+        total:
+          type: integer
+          description: Total number of peers
+          example: 5
+
+    NetworkConfig:
+      type: object
+      properties:
+        p2p_port:
+          type: integer
+          example: 9000
+        quic_port:
+          type: integer
+          example: 9001
+        max_connections:
+          type: integer
+          example: 100
+        bootstrap_peers:
+          type: array
+          items:
+            type: string
+          example: ["/ip4/192.168.1.100/tcp/9000"]
+        mdns_enabled:
+          type: boolean
+          example: true
+        gossipsub_params:
+          $ref: '#/components/schemas/GossipsubParams'
+
+    GossipsubParams:
+      type: object
+      properties:
+        mesh_size:
+          type: integer
+          example: 12
+        random_mesh_size:
+          type: integer
+          example: 4
+
+    NetworkConfigUpdate:
+      type: object
+      properties:
+        max_connections:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        bootstrap_peers:
+          type: array
+          items:
+            type: string
+
+    TransactionRequest:
+      type: object
+      required:
+        - id
+        - data
+        - nonce
+      properties:
+        id:
+          type: string
+          description: Unique transaction ID
+          example: "tx-001"
+        data:
+          type: string
+          description: Transaction data/payload
+          example: "hello world"
+        nonce:
+          type: integer
+          format: int64
+          description: Monotonically increasing nonce
+          example: 1
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "tx-001"
+        hash:
+          type: string
+          format: byte
+          example: "0xabc123def456"
+        data:
+          type: string
+          example: "hello world"
+        nonce:
+          type: integer
+          format: int64
+          example: 1
+        status:
+          type: string
+          enum: [pending, confirmed, failed]
+          example: "confirmed"
+        block_number:
+          type: integer
+          format: int64
+          nullable: true
+          example: 42
+        confirmations:
+          type: integer
+          format: int64
+          example: 3
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"
+
+    TransactionResult:
+      type: object
+      properties:
+        hash:
+          type: string
+          format: byte
+          example: "0xabc123"
+        status:
+          type: string
+          enum: [pending, confirmed, failed]
+          example: "pending"
+        block_number:
+          type: integer
+          format: int64
+          nullable: true
+          example: null
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"
+        nonce:
+          type: integer
+          format: int64
+          example: 1
+
+    Block:
+      type: object
+      properties:
+        height:
+          type: integer
+          format: int64
+          example: 42
+        hash:
+          type: string
+          format: byte
+          example: "0xdef456"
+        parent_hash:
+          type: string
+          format: byte
+          example: "0xabc123"
+        proposer:
+          type: string
+          description: PeerId of block proposer
+          example: "12D3KooWProposerId"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        quorum_votes:
+          type: integer
+          format: int64
+          example: 5
+        total_validators:
+          type: integer
+          format: int64
+          example: 7
+
+    BlacklistRequest:
+      type: object
+      required:
+        - action
+        - ip
+      properties:
+        action:
+          type: string
+          enum: [add, remove]
+          description: Action to perform
+          example: "add"
+        ip:
+          type: string
+          format: ipv4
+          description: IP address
+          example: "192.168.1.200"
+        reason:
+          type: string
+          description: Reason for blacklisting
+          example: "suspicious_activity"
+        duration_hours:
+          type: integer
+          description: Duration in hours (0 = permanent)
+          example: 12
+
+    BlacklistResponse:
+      type: object
+      properties:
+        blacklist:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlacklistEntry'
+        total:
+          type: integer
+          example: 1
+
+    BlacklistEntry:
+      type: object
+      properties:
+        ip:
+          type: string
+          format: ipv4
+          example: "192.168.1.200"
+        reason:
+          type: string
+          example: "malicious_activity"
+        added_at:
+          type: string
+          format: date-time
+          example: "2026-04-21T08:00:00Z"
+        duration_hours:
+          type: integer
+          example: 24
+
+    WhitelistResponse:
+      type: object
+      properties:
+        whitelist:
+          type: array
+          items:
+            $ref: '#/components/schemas/WhitelistEntry'
+        total:
+          type: integer
+          example: 1
+
+    WhitelistEntry:
+      type: object
+      properties:
+        peer_id:
+          type: string
+          example: "12D3KooWWhitelistedPeer"
+        ip:
+          type: string
+          format: ipv4
+          example: "192.168.1.100"
+        added_at:
+          type: string
+          format: date-time
+          example: "2026-04-20T10:00:00Z"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: "healthy"
+        uptime_seconds:
+          type: integer
+          format: int64
+          example: 3600
+        version:
+          type: string
+          example: "1.0.0"
+        checks:
+          type: object
+          properties:
+            service:
+              type: string
+              enum: [ok, degraded, down]
+              example: "ok"
+            database:
+              type: string
+              enum: [ok, degraded, down]
+              example: "ok"
+            network:
+              type: string
+              enum: [ok, degraded, down]
+              example: "ok"
+            consensus:
+              type: string
+              enum: [ok, degraded, down]
+              example: "ok"
+
+    UpdateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Configuration updated"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Bad Request"
+        message:
+          type: string
+          description: Human-readable error description
+          example: "Invalid nonce: must be greater than 5"
+        code:
+          type: string
+          description: Machine-readable error code
+          example: "INVALID_NONCE"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"

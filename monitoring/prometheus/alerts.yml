@@ -1,0 +1,197 @@
+groups:
+  - name: ebpf_blockchain_alerts
+    rules:
+      # =====================
+      # ALERTAS DE RED P2P
+      # =====================
+      - alert: HighPeerCount
+        expr: ebpf_node_peers_connected > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Alto número de peers conectados"
+          description: "El nodo tiene {{ $value }} peers conectados (umbral: 50). Posible ataque de saturación de red."
+
+      - alert: PeerDisconnectionRate
+        expr: rate(ebpf_node_p2p_connections_closed[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Alta tasa de desconexión de peers"
+          description: "Tasa de desconexión: {{ $value }} conexiones/segundo. Posible inestabilidad de red."
+
+      - alert: HighNetworkLatency
+        expr: ebpf_node_network_latency_ms > 1000
+        for: 5m
+        labels:
+          severity: critical
+          component: network
+        annotations:
+          summary: "Alta latencia de red"
+          description: "Latencia actual: {{ $value }}ms (umbral: 1000ms). Posible congestión de red."
+
+      - alert: BandwidthSaturation
+        expr: rate(ebpf_node_bandwidth_sent_bytes_total[5m]) > 10485760  # 10MB/s
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Saturación de bandwidth"
+          description: "Bandwidth enviado: {{ $value }} bytes/segundo. Posible saturación de enlace."
+
+      # =====================
+      # ALERTAS DE CONSENSO
+      # =====================
+      - alert: ConsensusSlow
+        expr: ebpf_node_consensus_duration_ms > 10000
+        for: 5m
+        labels:
+          severity: critical
+          component: consensus
+        annotations:
+          summary: "Consenso lento"
+          description: "Duración del consenso: {{ $value }}ms (umbral: 10s). Posible congestión del protocolo."
+
+      - alert: LowValidatorCount
+        expr: ebpf_node_validator_count < 2
+        for: 2m
+        labels:
+          severity: critical
+          component: consensus
+        annotations:
+          summary: "Bajo número de validadores"
+          description: "Solo {{ $value }} validadores activos (umbral mínimo: 2). Riesgo de degradación del consenso."
+
+      - alert: HighConsensusRoundRate
+        expr: rate(ebpf_node_consensus_rounds_total[5m]) > 60  # > 1 por segundo
+        for: 5m
+        labels:
+          severity: warning
+          component: consensus
+        annotations:
+          summary: "Tasa excesiva de rondas de consenso"
+          description: "Tasa: {{ $value }} rondas/segundo. Posible inestabilidad del protocolo."
+
+      - alert: SlashingEventDetected
+        expr: ebpf_node_slashing_events_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: consensus
+        annotations:
+          summary: "Evento de slashing detectado"
+          description: "{{ $value }} evento(s) de slashing registrado(s). Posible comportamiento malicioso."
+
+      # =====================
+      # ALERTAS DE TRANSACCIONES
+      # =====================
+      - alert: TransactionQueueOverflow
+        expr: ebpf_node_transaction_queue_size > 500
+        for: 5m
+        labels:
+          severity: warning
+          component: transactions
+        annotations:
+          summary: "Cola de transacciones sobrepasada"
+          description: "Tamaño de cola: {{ $value }} transacciones (umbral: 500). Posible degradación del procesamiento."
+
+      - alert: HighTransactionFailureRate
+        expr: rate(ebpf_node_transactions_failures_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          component: transactions
+        annotations:
+          summary: "Alta tasa de fallos de transacción"
+          description: "Tasa de fallos: {{ $value }} transacciones/segundo. Posible problema de validación."
+
+      - alert: LowTransactionThroughput
+        expr: rate(ebpf_node_transactions_processed_total[5m]) < 1
+        for: 10m
+        labels:
+          severity: warning
+          component: transactions
+        annotations:
+          summary: "Bajo throughput de transacciones"
+          description: "TPS: {{ $value }} transacciones/segundo (umbral: 1 TPS). Posible congestión del sistema."
+
+      - alert: TransactionReplayAttack
+        expr: ebpf_node_transactions_replay_rejected_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Posible ataque de replay de transacciones"
+          description: "{{ $value }} transacción(es) rechazada(s) por replay. Posible ataque activo."
+
+      # =====================
+      # ALERTAS DE SEGURIDAD
+      # =====================
+      - alert: SybilAttackDetected
+        expr: ebpf_node_sybil_attempts_detected_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Posible ataque Sybil detectado"
+          description: "{{ $value }} intento(s) Sybil detectado(s). Posible ataque de identidad falsa."
+
+      - alert: XDPPacketDropRate
+        expr: rate(ebpf_node_xdp_packets_dropped_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Alta tasa de paquetes descartados por XDP"
+          description: "Tasa de drops: {{ $value }} paquetes/segundo. Posible ataque DDoS o configuración errónea."
+
+      - alert: XDPBlacklistGrowing
+        expr: ebpf_node_xdp_blacklist_size > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Blacklist XDP creciendo excesivamente"
+          description: "Tamaño de blacklist: {{ $value }} IPs (umbral: 1000). Posible ataque masivo."
+
+      # =====================
+      # ALERTAS DEL SISTEMA
+      # =====================
+      - alert: HighMemoryUsage
+        expr: ebpf_node_memory_usage_bytes > 1073741824  # 1GB
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Alto uso de memoria"
+          description: "Uso de memoria: {{ $value }} bytes (umbral: 1GB). Posible fuga de memoria."
+
+      - alert: NodeDown
+        expr: up{job="ebpf-node"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Nodo caído"
+          description: "El nodo {{ $labels.instance }} está caído desde hace 1 minuto."
+
+      - alert: UptimeAnomaly
+        expr: ebpf_node_uptime_seconds < 60
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Uptime anormalmente bajo"
+          description: "Uptime: {{ $value }} segundos. Posible reinicio reciente o inestabilidad."
