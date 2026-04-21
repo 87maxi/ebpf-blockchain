@@ -15,8 +15,18 @@ use network_types::{
     ip::Ipv4Hdr,
 };
 
+/// Whitelist of trusted IPs using longest prefix match.
+/// Packets from IPs NOT in this whitelist will be dropped.
+/// This is a preventive security measure - only trusted peers are allowed.
+/// Format: Key = (prefix_length, ip_address), Value = 1 (trusted)
 #[map]
-static NODES_BLACKLIST: LpmTrie<u32, u32> = LpmTrie::with_max_entries(1024, BPF_F_NO_PREALLOC);
+static NODES_WHITELIST: LpmTrie<u32, u32> = LpmTrie::with_max_entries(1024, BPF_F_NO_PREALLOC);
+
+/// Reactive blacklist for IPs detected as malicious during operation.
+/// This complements the whitelist for dynamic threat response.
+/// Format: Key = (prefix_length, ip_address), Value = 1 (blocked)
+#[map]
+static NODES_BLACKLIST: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10240, BPF_F_NO_PREALLOC);
 
 /// Histogram of latencies.
 /// Key is the bucket (power of 2 of the latency in nanoseconds), value is the count.
@@ -58,12 +68,22 @@ fn try_ebpf_node(ctx: XdpContext) -> Result<u32, ()> {
     let ipv4hdr: *const Ipv4Hdr = unsafe { ptr_at(&ctx, mem::size_of::<EthHdr>())? };
     let source_addr = unsafe { (*ipv4hdr).src_addr };
 
-    // Check if the source IP is in the blacklist using longest prefix match.
-    let key = Key::new(32, source_addr);
-    if unsafe { NODES_BLACKLIST.get(&key) }.is_some() {
+    // SECURITY: Whitelist XDP - Preventive filtering
+    // First check if the source IP is in the blacklist (reactive - detected malicious)
+    let blacklist_key = Key::new(32, source_addr);
+    if NODES_BLACKLIST.get(&blacklist_key).is_some() {
+        return Ok(xdp_action::XDP_DROP);
+    }
+    
+    // Then check if the source IP is in the whitelist (preventive - trusted)
+    // If NOT in whitelist, drop the packet
+    let whitelist_key = Key::new(32, source_addr);
+    if NODES_WHITELIST.get(&whitelist_key).is_none() {
+        // IP not in whitelist - drop packet
         return Ok(xdp_action::XDP_DROP);
     }
 
+    // IP is in whitelist and not in blacklist - allow
     Ok(xdp_action::XDP_PASS)
 }
 
