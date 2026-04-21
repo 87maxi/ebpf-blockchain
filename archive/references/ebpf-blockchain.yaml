@@ -1,0 +1,17 @@
+name: ebpf-blockchain
+description: "Entorno de desarrollo eBPF con Rust + Aya - Perfil LXC"
+config:
+  limits.cpu: "4"
+  limits.memory: 8GiB
+  security.privileged: "true"
+  security.syscalls.intercept.bpf: "true"
+  security.syscalls.intercept.bpf.devices: "true"
+devices:
+  root:
+    path: /
+    pool: default
+    type: disk
+  eth0:
+    name: eth0
+    network: lxdbr1
+    type: nic
