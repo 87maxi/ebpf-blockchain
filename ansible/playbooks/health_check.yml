@@ -1,0 +1,161 @@
+---
+# =============================================================================
+# Health Check Playbook
+# Descripción: Verifica el estado del nodo eBPF después de despliegue/rollback
+# Uso: ansible-playbook health_check.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: eBPF Node Health Checks
+  hosts: ebpf_nodes
+  become: yes
+  gather_facts: yes
+
+  vars:
+    ebpf_service: "ebpf-blockchain"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    metrics_port: 9090
+    rpc_port: 3000
+    p2p_port: 50000
+
+  tasks:
+    # ---- Service Health ----
+    - name: Check service status
+      systemd:
+        name: "{{ ebpf_service }}"
+      register: service_status
+
+    - name: Verify service is active
+      fail:
+        msg: "Service {{ ebpf_service }} is NOT active. State: {{ service_status.status.ActiveState | default('unknown') }}"
+      when: service_status.status.ActiveState | default('inactive') != 'active'
+
+    - name: Check service uptime
+      shell: systemctl status {{ ebpf_service }} | grep "Active" | head -1
+      register: uptime_status
+      changed_when: false
+
+    - name: Display service uptime
+      debug:
+        msg: "Service uptime: {{ uptime_status.stdout }}"
+
+    # ---- Resource Health ----
+    - name: Check disk usage
+      shell: df -h {{ ebpf_data_dir }} | tail -1 | awk '{print $5}'
+      register: disk_usage
+      changed_when: false
+
+    - name: Warn if disk usage high
+      debug:
+        msg: "WARNING: Disk usage is {{ disk_usage.stdout }}. Consider cleanup."
+      when: disk_usage.stdout | replace('%', '') | int > 80
+
+    - name: Check memory usage
+      shell: ps -p $(pgrep -f ebpf-node | head -1) --no-headers -o %mem 2>/dev/null || echo "0"
+      register: memory_usage
+      changed_when: false
+
+    - name: Display memory usage
+      debug:
+        msg: "eBPF Node memory usage: {{ memory_usage.stdout }}%"
+
+    # ---- Network Health ----
+    - name: Check P2P port is listening
+      wait_for:
+        port: "{{ p2p_port }}"
+        timeout: 5
+      register: p2p_port_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Verify P2P port is accessible
+      fail:
+        msg: "P2P port {{ p2p_port }} is not accessible. Check firewall rules."
+      when: p2p_port_check.failed | default(false)
+
+    - name: Check metrics endpoint
+      uri:
+        url: "http://localhost:{{ metrics_port }}/metrics"
+        return_content: yes
+        status_code: 200
+      register: metrics_response
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Verify metrics are available
+      fail:
+        msg: "Metrics endpoint not responding. Prometheus will not receive data."
+      when: metrics_response.status | default(0) != 200
+
+    - name: Check RPC endpoint
+      uri:
+        url: "http://localhost:{{ rpc_port }}/api/v1/node/info"
+        return_content: yes
+        status_code: 200
+      register: rpc_response
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display node info
+      debug:
+        msg: "Node info: {{ rpc_response.json | default({'status': 'unavailable'}) }}"
+      when: rpc_response.status | default(0) == 200
+
+    # ---- Log Health ----
+    - name: Check for recent errors in logs
+      shell: |
+        journalctl -u {{ ebpf_service }} --since "5 minutes ago" --no-pager | grep -i "error\|panic\|fatal" | tail -5
+      register: recent_errors
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Report recent errors
+      debug:
+        msg: "Recent errors found:\n{{ recent_errors.stdout | default('None') }}"
+      when: recent_errors.stdout | default('') | length > 0
+
+    # ---- Data Directory Health ----
+    - name: Check data directory exists
+      stat:
+        path: "{{ ebpf_data_dir }}"
+      register: data_dir_check
+
+    - name: Verify data directory is accessible
+      fail:
+        msg: "Data directory {{ ebpf_data_dir }} does not exist or is not accessible."
+      when: not data_dir_check.stat.exists
+
+    - name: Check data directory size
+      shell: du -sh {{ ebpf_data_dir }} 2>/dev/null | awk '{print $1}'
+      register: data_size
+      changed_when: false
+
+    - name: Display data directory size
+      debug:
+        msg: "Data directory size: {{ data_size.stdout | default('unknown') }}"
+
+    # ---- Peer Connectivity ----
+    - name: Check peer count from metrics
+      shell: |
+        curl -s http://localhost:{{ metrics_port }}/metrics | grep "ebpf_node_peers_connected" | tail -1
+      register: peer_metrics
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display peer count
+      debug:
+        msg: "Peer count: {{ peer_metrics.stdout | default('unknown') }}"
+      when: peer_metrics.stdout | default('') | length > 0
+
+    # ---- Health Check Summary ----
+    - name: Health check summary
+      debug:
+        msg:
+          - "============================================"
+          - "Health Check Results"
+          - "Service: {{ 'PASS' if service_status.status.ActiveState == 'active' else 'FAIL' }}"
+          - "P2P Port: {{ 'PASS' if not p2p_port_check.failed else 'FAIL' }}"
+          - "Metrics: {{ 'PASS' if metrics_response.status == 200 else 'FAIL' }}"
+          - "RPC: {{ 'PASS' if rpc_response.status == 200 else 'FAIL' }}"
+          - "Disk: {{ disk_usage.stdout | default('unknown') }}"
+          - "============================================"

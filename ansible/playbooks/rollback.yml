@@ -1,0 +1,156 @@
+---
+# =============================================================================
+# Rollback eBPF Blockchain Node
+# Descripción: Rollback a versión anterior con backup del estado actual
+# Uso: ansible-playbook rollback.yml -i inventory/hosts.yml \
+#      -e rollback_version=abc123 [-e rollback_data=true]
+# =============================================================================
+
+- name: Rollback eBPF Blockchain Node
+  hosts: ebpf_nodes
+  become: yes
+  gather_facts: yes
+  any_errors_fatal: true
+
+  vars:
+    rollback_version: "{{ rollback_version | default('last_successful') }}"
+    rollback_data: "{{ rollback_data | default(true) }}"
+    ebpf_node_dir: "/root/ebpf-blockchain"
+    ebpf_node_bin: "{{ ebpf_node_dir }}/ebpf-node/target/release/ebpf-node"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    rollback_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    rollback_log: "{{ ebpf_log_dir }}/rollback_{{ rollback_timestamp }}.log"
+
+  pre_tasks:
+    - name: Record rollback initiation
+      copy:
+        content: "{{ rollback_timestamp }} ROLLBACK INITIATED - Version: {{ rollback_version }}\n"
+        dest: "{{ rollback_log }}"
+        mode: "0644"
+
+    - name: Check backup availability
+      shell: |
+        ls {{ ebpf_log_dir }}/backups/pre_rollback_*.tar.gz 2>/dev/null | head -1
+      register: backup_files
+      changed_when: false
+      failed_when: false
+
+    - name: Verify backup exists for data rollback
+      fail:
+        msg: "No backup found. Cannot rollback data without a backup. Check: {{ ebpf_log_dir }}/backups/"
+      when: rollback_data and (backup_files.stdout | length == 0)
+
+  tasks:
+    # ---- Stop Current Service ----
+    - name: Stop current service
+      systemd:
+        name: ebpf-blockchain
+        state: stopped
+      ignore_errors: yes
+
+    - name: Record service stopped
+      copy:
+        content: "{{ rollback_timestamp }} Service stopped\n"
+        dest: "{{ rollback_log }}"
+        mode: "0644"
+      when: rollback_log is defined
+
+    # ---- Backup Current State ----
+    - name: Backup current data directory
+      shell: |
+        if [ -d "{{ ebpf_data_dir }}" ]; then
+          tar -czf "{{ ebpf_log_dir }}/backups/rollback_backup_{{ rollback_timestamp }}.tar.gz" \
+            -C /var/lib ebpf-blockchain
+          echo "Backup created: {{ ebpf_log_dir }}/backups/rollback_backup_{{ rollback_timestamp }}.tar.gz"
+        else
+          echo "No data directory to backup"
+        fi
+      register: backup_result
+      changed_when: "'Backup created' in backup_result.stdout"
+
+    # ---- Restore Previous Version ----
+    - name: Rollback binary to previous version
+      shell: |
+        # Check if we have a versioned binary directory
+        if [ -d "{{ ebpf_node_dir }}/ebpf-node/target/release.bak" ]; then
+          rm -rf "{{ ebpf_node_bin }}"
+          cp -r "{{ ebpf_node_dir }}/ebpf-node/target/release.bak" "{{ ebpf_node_bin }}"
+          echo "Restored from release.bak"
+        else
+          echo "No previous binary backup found. Will rebuild from git."
+          cd {{ ebpf_node_dir }}
+          git checkout {{ rollback_version }} 2>/dev/null || git checkout main
+          source /root/.cargo/env
+          cd ebpf-node
+          cargo build --release --bin ebpf-node 2>&1 | tail -5
+          echo "Rebuilt from source at {{ rollback_version }}"
+        fi
+      register: rollback_binary
+      changed_when: true
+
+    - name: Record binary rollback status
+      copy:
+        content: "{{ rollback_timestamp }} Binary: {{ rollback_binary.stdout_lines[-1] }}\n"
+        dest: "{{ rollback_log }}"
+        mode: "0644"
+
+    - name: Rollback data directory
+      shell: |
+        if {{ rollback_data }}; then
+          LATEST_BACKUP=$(ls -t {{ ebpf_log_dir }}/backups/rollback_backup_{{ rollback_timestamp }}.tar.gz 2>/dev/null | head -1)
+          if [ -n "$LATEST_BACKUP" ]; then
+            # Extract to temp, then restore
+            TEMP_DIR=$(mktemp -d)
+            tar -xzf "$LATEST_BACKUP" -C "$TEMP_DIR"
+            rm -rf "{{ ebpf_data_dir }}"
+            mv "$TEMP_DIR/var/lib/ebpf-blockchain" "{{ ebpf_data_dir }}"
+            echo "Data restored from backup"
+          fi
+        fi
+      when: rollback_data
+      ignore_errors: yes
+
+    # ---- Start Service ----
+    - name: Start service with rolled-back version
+      systemd:
+        name: ebpf-blockchain
+        state: started
+        enabled: yes
+      register: service_start
+
+    - name: Wait for service to be running
+      shell: |
+        sleep 15
+        systemctl is-active ebpf-blockchain
+      register: active_check
+      changed_when: false
+      retries: 5
+      delay: 10
+
+    # ---- Verify Rollback ----
+    - name: Verify service is active after rollback
+      fail:
+        msg: "Service failed to start after rollback. Manual intervention required."
+      when: active_check.stdout != "active"
+
+    - name: Run post-rollback health checks
+      include_tasks: health_check.yml
+      ignore_errors: yes
+
+    - name: Record rollback completion
+      copy:
+        content: "{{ rollback_timestamp}} ROLLBACK COMPLETED - Version: {{ rollback_version }} - Status: SUCCESS\n"
+        dest: "{{ rollback_log }}"
+        mode: "0644"
+
+  post_tasks:
+    - name: Rollback summary
+      debug:
+        msg:
+          - "============================================"
+          - "Rollback completed!"
+          - "Version: {{ rollback_version }}"
+          - "Timestamp: {{ rollback_timestamp }}"
+          - "Log: {{ rollback_log }}"
+          - "============================================"

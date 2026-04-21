@@ -1,0 +1,277 @@
+# =============================================================================
+# Disaster Recovery Playbook - eBPF Blockchain
+# Descripción: Recuperación completa ante desastre
+# Uso: ansible-playbook disaster_recovery.yml -i inventory/hosts.yml \
+#      -e recovery_mode=full [-e backup_file=<path_to_backup>]
+# =============================================================================
+
+- name: Disaster Recovery
+  hosts: ebpf_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    recovery_mode: "{{ recovery_mode | default('full') }}"  # full, service, data
+    backup_file: "{{ backup_file | default('') }}"
+    ebpf_service: "ebpf-blockchain"
+    ebpf_node_dir: "/root/ebpf-blockchain"
+    ebpf_node_bin: "{{ ebpf_node_dir }}/ebpf-node/target/release/ebpf-node"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    recovery_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    recovery_log: "{{ ebpf_log_dir }}/disaster_recovery_{{ recovery_timestamp }}.log"
+
+  pre_tasks:
+    - name: Record recovery initiation
+      copy:
+        content: "{{ recovery_timestamp }} DISASTER RECOVERY INITIATED - Mode: {{ recovery_mode }}\n"
+        dest: "{{ recovery_log }}"
+        mode: "0644"
+
+    - name: Notify recovery start
+      debug:
+        msg:
+          - "=========================================="
+          - "DISASTER RECOVERY STARTED"
+          - "Mode: {{ recovery_mode }}"
+          - "Timestamp: {{ recovery_timestamp }}"
+          - "=========================================="
+
+  tasks:
+    # ========================================================================
+    # Phase 1: Stop All Services
+    # ========================================================================
+    - name: Phase 1 - Stop all services
+      block:
+        - name: Stop eBPF blockchain service
+          systemd:
+            name: "{{ ebpf_service }}"
+            state: stopped
+          ignore_errors: true
+
+        - name: Stop monitoring services
+          systemd:
+            name: "{{ item }}"
+            state: stopped
+          loop: [prometheus, grafana, loki, promtail, tempo]
+          ignore_errors: true
+
+        - name: Kill any remaining processes
+          shell: |
+            pkill -f ebpf-node || true
+            pkill -f prometheus || true
+            pkill -f grafana || true
+          ignore_errors: true
+
+        - name: Record services stopped
+          copy:
+            content: "{{ recovery_timestamp }} All services stopped\n"
+            dest: "{{ recovery_log }}"
+            mode: "0644"
+
+    # ========================================================================
+    # Phase 2: Assess Current State
+    # ========================================================================
+    - name: Phase 2 - Assess current state
+      block:
+        - name: Check data directory status
+          stat:
+            path: "{{ ebpf_data_dir }}"
+          register: data_dir_status
+
+        - name: Check binary status
+          stat:
+            path: "{{ ebpf_node_bin }}"
+          register: binary_status
+
+        - name: Check disk space
+          command: df -h /var/lib
+          register: disk_space
+          changed_when: false
+
+        - name: Record assessment
+          copy:
+            content: |
+              {{ recovery_timestamp }} ASSESSMENT:
+              Data dir exists: {{ data_dir_status.stat.exists | default(false) }}
+              Binary exists: {{ binary_status.stat.exists | default(false) }}
+              Disk space: {{ disk_space.stdout | default('unknown') }}
+            dest: "{{ recovery_log }}"
+            mode: "0644"
+
+    # ========================================================================
+    # Phase 3: Restore from Backup
+    # ========================================================================
+    - name: Phase 3 - Restore from backup
+      block:
+        - name: Find latest backup if not specified
+          shell: |
+            ls -t {{ ebpf_log_dir }}/backups/rocksdb_*.tar.gz 2>/dev/null | head -1
+          register: latest_backup
+          changed_when: false
+          failed_when: false
+          when: backup_file | length == 0
+
+        - name: Set backup file
+          set_fact:
+            backup_file: "{{ latest_backup.stdout | default(backup_file) }}"
+          when: backup_file | length == 0
+
+        - name: Verify backup file exists
+          stat:
+            path: "{{ backup_file }}"
+          register: backup_status
+          failed_when: backup_file | length > 0 and not backup_status.stat.exists
+
+        - name: Stop service before restore
+          systemd:
+            name: "{{ ebpf_service }}"
+            state: stopped
+          ignore_errors: true
+
+        - name: Backup current data (safety net)
+          shell: |
+            if [ -d "{{ ebpf_data_dir }}" ]; then
+              tar -czf "{{ ebpf_log_dir }}/backups/pre_recovery_{{ recovery_timestamp }}.tar.gz" \
+                -C /var/lib ebpf-blockchain 2>/dev/null || true
+            fi
+          ignore_errors: true
+
+        - name: Restore RocksDB data
+          shell: |
+            if [ -f "{{ backup_file }}" ]; then
+              rm -rf "{{ ebpf_data_dir }}"
+              mkdir -p "{{ ebpf_data_dir }}"
+              tar -xzf "{{ backup_file }}" -C "{{ ebpf_data_dir }}/.." 2>/dev/null
+              echo "Data restored from {{ backup_file }}"
+            else
+              echo "No backup file found for restore"
+            fi
+          register: restore_result
+          when: backup_file | length > 0
+
+        - name: Record restore status
+          copy:
+            content: "{{ recovery_timestamp }} Restore: {{ restore_result.stdout | default('skipped') }}\n"
+            dest: "{{ recovery_log }}"
+            mode: "0644"
+          when: restore_result is defined
+
+    # ========================================================================
+    # Phase 4: Rebuild from Source (if needed)
+    # ========================================================================
+    - name: Phase 4 - Rebuild from source if binary missing
+      block:
+        - name: Clone/Pull repository
+          shell: |
+            cd {{ ebpf_node_dir }}
+            if [ ! -d .git ]; then
+              git clone https://github.com/user/ebpf-blockchain.git {{ ebpf_node_dir }}
+            else
+              git pull --ff-only
+            fi
+          args:
+            creates: "{{ ebpf_node_dir }}/Cargo.toml"
+
+        - name: Build eBPF node
+          shell: |
+            source /root/.cargo/env
+            cd {{ ebpf_node_dir }}/ebpf-node
+            cargo build --release --bin ebpf-node
+          args:
+            creates: "{{ ebpf_node_bin }}"
+
+        - name: Verify binary
+          stat:
+            path: "{{ ebpf_node_bin }}"
+          register: binary_check
+
+        - name: Fail if binary not built
+          fail:
+            msg: "Failed to build binary. Check build logs."
+          when: not binary_check.stat.exists
+
+      when: not binary_status.stat.exists | default(true)
+
+    # ========================================================================
+    # Phase 5: Start Services in Order
+    # ========================================================================
+    - name: Phase 5 - Start services in order
+      block:
+        - name: Start monitoring services first
+          systemd:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop: [prometheus, loki, tempo, grafana]
+          ignore_errors: true
+          when: item in ansible_facts.services
+
+        - name: Wait for monitoring to start
+          wait_for:
+            port: "{{ item }}"
+            timeout: 30
+          loop:
+            - 9090  # prometheus
+            - 3000  # grafana
+          ignore_errors: true
+
+        - name: Start eBPF blockchain service
+          systemd:
+            name: "{{ ebpf_service }}"
+            state: started
+            enabled: true
+          register: service_start
+
+        - name: Wait for service to be running
+          shell: |
+            sleep 15
+            systemctl is-active {{ ebpf_service }}
+          register: active_check
+          changed_when: false
+          retries: 5
+          delay: 10
+
+        - name: Verify service is active
+          fail:
+            msg: "Service failed to start after disaster recovery. Manual intervention required."
+          when: active_check.stdout != "active"
+
+    # ========================================================================
+    # Phase 6: Post-Recovery Validation
+    # ========================================================================
+    - name: Phase 6 - Post-recovery validation
+      block:
+        - name: Run health checks
+          include_tasks: health_check.yml
+          ignore_errors: true
+
+        - name: Check metrics endpoint
+          uri:
+            url: "http://localhost:9090/metrics"
+            return_content: true
+            status_code: 200
+          register: metrics_response
+          ignore_errors: true
+
+        - name: Record recovery completion
+          copy:
+            content: |
+              {{ recovery_timestamp }} DISASTER RECOVERY COMPLETED
+              Mode: {{ recovery_mode }}
+              Service active: {{ active_check.stdout | default('unknown') }}
+              Metrics available: {{ metrics_response.status | default('unknown') }}
+            dest: "{{ recovery_log }}"
+            mode: "0644"
+
+  post_tasks:
+    - name: Recovery summary
+      debug:
+        msg:
+          - "=========================================="
+          - "DISASTER RECOVERY COMPLETED"
+          - "Mode: {{ recovery_mode }}"
+          - "Timestamp: {{ recovery_timestamp }}"
+          - "Log: {{ recovery_log }}"
+          - "=========================================="

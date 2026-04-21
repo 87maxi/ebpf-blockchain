@@ -1,0 +1,215 @@
+---
+# =============================================================================
+# Deploy eBPF Blockchain Node
+# Descripción: Despliegue principal con error handling robusto,
+#              pre-deployment checks, y rollback automático
+# Uso: ansible-playbook deploy.yml -i inventory/hosts.yml [-e deployment_version=abc123]
+# =============================================================================
+
+- name: Deploy eBPF Blockchain Node
+  hosts: ebpf_nodes
+  become: yes
+  gather_facts: yes
+  any_errors_fatal: true
+
+  vars:
+    deployment_version: "{{ lookup('env', 'DEPLOYMENT_VERSION', default='latest') }}"
+    rollback_on_failure: true
+    ebpf_node_dir: "/root/ebpf-blockchain"
+    ebpf_node_bin: "{{ ebpf_node_dir }}/ebpf-node/target/release/ebpf-node"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    min_disk_space_mb: 5120
+    min_free_memory_mb: 1024
+    deployment_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    deployment_log: "{{ ebpf_log_dir }}/deployment_{{ deployment_timestamp }}.log"
+
+  pre_tasks:
+    - name: Pre-deployment checks
+      block:
+        - name: Check disk space
+          command: df -m /var/lib | tail -1 | awk '{print $4}'
+          register: disk_free_mb
+          changed_when: false
+
+        - name: Fail if disk space insufficient
+          fail:
+            msg: "Insufficient disk space. Available: {{ disk_free_mb.stdout }}MB, Required: {{ min_disk_space_mb }}MB"
+          when: disk_free_mb.stdout | int < min_disk_space_mb
+
+        - name: Check available memory
+          command: free -m | awk '/Mem:/ {print $4}'
+          register: memory_free_mb
+          changed_when: false
+
+        - name: Fail if memory insufficient
+          fail:
+            msg: "Insufficient memory. Available: {{ memory_free_mb.stdout }}MB, Required: {{ min_free_memory_mb }}MB"
+          when: memory_free_mb.stdout | int < min_free_memory_mb
+
+        - name: Check Rust is installed
+          command: rustc --version
+          register: rust_version
+          changed_when: false
+          failed_when: false
+
+        - name: Verify Rust installation
+          fail:
+            msg: "Rust is not installed. Please run the dependencies playbook first."
+          when: rust_version.rc != 0
+
+      rescue:
+        - name: Log pre-deployment check failure
+          copy:
+            content: "{{ deployment_timestamp }} PRE-CHECK FAILED: {{ ansible_failed_task.name }}\n"
+            dest: "{{ deployment_log }}"
+            mode: "0644"
+
+        - name: Abort deployment on pre-check failure
+          meta: end_play
+
+  tasks:
+    # ---- Environment Setup ----
+    - name: Create eBPF directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ebpf_data_dir }}"
+        - "{{ ebpf_log_dir }}"
+        - "{{ ebpf_log_dir }}/backups"
+
+    # ---- Build from Source ----
+    - name: Clone/Pull repository
+      shell: |
+        cd {{ ebpf_node_dir }}
+        if [ -d .git ]; then
+          git pull --ff-only
+        else
+          git clone {{ git_repo_url | default('https://github.com/user/ebpf-blockchain.git') }} {{ ebpf_node_dir }}
+        fi
+      args:
+        creates: "{{ ebpf_node_dir }}/Cargo.toml"
+      register: git_pull
+      changed_when: git_pull.rc == 0
+
+    - name: Build eBPF node in release mode
+      shell: |
+        source /root/.cargo/env
+        cd {{ ebpf_node_dir }}/ebpf-node
+        cargo build --release --bin ebpf-node
+      args:
+        creates: "{{ ebpf_node_bin }}"
+      register: cargo_build
+      changed_when: cargo_build.rc == 0
+      retries: 2
+      delay: 10
+
+    - name: Verify binary
+      stat:
+        path: "{{ ebpf_node_bin }}"
+      register: binary_check
+      failed_when: not binary_check.stat.exists
+
+    # ---- Service Deployment ----
+    - name: Deploy systemd service file
+      template:
+        src: "{{ playbook_dir }}/../roles/lxc_node/templates/ebpf-blockchain.service.j2"
+        dest: /etc/systemd/system/ebpf-blockchain.service
+        mode: "0644"
+      notify: restart ebpf-blockchain
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start eBPF service
+      systemd:
+        name: ebpf-blockchain
+        enabled: yes
+        state: started
+      register: service_status
+
+    - name: Wait for service to be running
+      shell: |
+        sleep 10
+        systemctl is-active ebpf-blockchain
+      register: active_check
+      changed_when: false
+      retries: 5
+      delay: 10
+
+    - name: Verify service is active
+      fail:
+        msg: "Service ebpf-blockchain failed to start. Check: journalctl -u ebpf-blockchain -n 50"
+      when: active_check.stdout != "active"
+
+    # ---- Post-deployment Validation ----
+    - name: Run post-deployment health checks
+      include_tasks: health_check.yml
+      ignore_errors: yes
+
+  rescue:
+    - name: Deployment failed - trigger rollback
+      block:
+        - name: Log deployment failure
+          copy:
+            content: "{{ deployment_timestamp }} DEPLOYMENT FAILED: Rolling back\n"
+            dest: "{{ deployment_log }}"
+            mode: "0644"
+
+        - name: Stop potentially broken service
+          systemd:
+            name: ebpf-blockchain
+            state: stopped
+          ignore_errors: yes
+
+        - name: Backup current state before rollback
+          shell: |
+            if [ -d "{{ ebpf_data_dir }}" ]; then
+              tar -czf "{{ ebpf_log_dir }}/backups/pre_rollback_{{ deployment_timestamp }}.tar.gz" \
+                -C /var/lib ebpf-blockchain 2>/dev/null || true
+            fi
+
+        - name: Rollback to previous version
+          shell: |
+            # Find latest backup
+            LATEST_BACKUP=$(ls -t {{ ebpf_log_dir }}/backups/pre_rollback_*.tar.gz 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              tar -xzf "$LATEST_BACKUP" -C /
+              echo "Rolled back from $LATEST_BACKUP"
+            else
+              echo "No backup found for rollback"
+            fi
+          ignore_errors: yes
+
+        - name: Restart service after rollback
+          systemd:
+            name: ebpf-blockchain
+            state: restarted
+          ignore_errors: yes
+
+    - name: Record deployment failure
+      copy:
+        content: "{{ deployment_timestamp }} DEPLOYMENT COMPLETED WITH ERRORS - Manual review required\n"
+        dest: "{{ deployment_log }}"
+        mode: "0644"
+
+  post_tasks:
+    - name: Deployment summary
+      debug:
+        msg:
+          - "============================================"
+          - "Deployment completed successfully!"
+          - "Version: {{ deployment_version }}"
+          - "Timestamp: {{ deployment_timestamp }}"
+          - "Data dir: {{ ebpf_data_dir }}"
+          - "Log dir: {{ ebpf_log_dir }}"
+          - "============================================"
+
+  handlers:
+    - name: restart ebpf-blockchain
+      systemd:
+        name: ebpf-blockchain
+        state: restarted

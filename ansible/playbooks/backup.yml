@@ -1,0 +1,100 @@
+# =============================================================================
+# Backup Playbook - eBPF Blockchain
+# Descripción: Ejecuta backup automatizado en todos los nodos
+# Uso: ansible-playbook backup.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: eBPF Blockchain Backup
+  hosts: ebpf_nodes
+  become: yes
+  gather_facts: yes
+
+  vars:
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    backup_script: "/var/lib/ebpf-blockchain/bin/backup.sh"
+    backup_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+  pre_tasks:
+    - name: Pre-backup checks
+      block:
+        - name: Check disk space
+          command: df -m {{ ebpf_data_dir }} | tail -1 | awk '{print $4}'
+          register: disk_free_mb
+          changed_when: false
+
+        - name: Verify minimum disk space
+          fail:
+            msg: "Insufficient disk space for backup. Available: {{ disk_free_mb.stdout }}MB"
+          when: disk_free_mb.stdout | int < 512
+
+        - name: Check service is running
+          systemd:
+            name: ebpf-blockchain
+          register: service_status
+
+        - name: Record backup start
+          copy:
+            content: "{{ backup_timestamp}} BACKUP STARTED - Disk free: {{ disk_free_mb.stdout }}MB\n"
+            dest: "{{ ebpf_log_dir }}/backup_playbook.log"
+            mode: "0644"
+
+  tasks:
+    # ========================================================================
+    # Ensure backup script exists
+    # ========================================================================
+    - name: Create backup script directory
+      file:
+        path: /var/lib/ebpf-blockchain/bin
+        state: directory
+        mode: "0755"
+
+    - name: Deploy backup script
+      copy:
+        src: "../../scripts/backup.sh"
+        dest: "{{ backup_script }}"
+        mode: "0755"
+
+    # ========================================================================
+    # Run backup
+    # ========================================================================
+    - name: Execute backup script
+      shell: |
+        export BACKUP_BASE_DIR="{{ ebpf_data_dir }}/backups"
+        export DATA_DIR="{{ ebpf_data_dir }}/data"
+        export LOG_DIR="{{ ebpf_log_dir }}"
+        {{ backup_script }}
+      register: backup_result
+      changed_when: "'completed successfully' in backup_result.stdout"
+
+    - name: Record backup result
+      copy:
+        content: "{{ backup_timestamp}} BACKUP RESULT: {{ backup_result.stdout_lines[-1] | default('unknown') }}\n"
+        dest: "{{ ebpf_log_dir }}/backup_playbook.log"
+        mode: "0644"
+
+    # ========================================================================
+    # Verify backup
+    # ========================================================================
+    - name: List recent backups
+      shell: |
+        ls -lh {{ ebpf_data_dir }}/backups/*.tar.gz 2>/dev/null | tail -5
+      register: backup_list
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display backup information
+      debug:
+        msg: "{{ backup_list.stdout_lines | default(['No backups found']) }}"
+      when: backup_list.stdout | default('') | length > 0
+
+  post_tasks:
+    - name: Backup summary
+      debug:
+        msg:
+          - "=========================================="
+          - "Backup completed"
+          - "Timestamp: {{ backup_timestamp }}"
+          - "Data dir: {{ ebpf_data_dir }}"
+          - "Backup dir: {{ ebpf_data_dir }}/backups"
+          - "=========================================="

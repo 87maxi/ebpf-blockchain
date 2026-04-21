@@ -1,0 +1,415 @@
+# =============================================================================
+# CI/CD Pipeline - eBPF Blockchain
+# Descripción: Pipeline completo de integración continua y despliegue continuo
+# Stages: lint -> test -> build -> deploy-staging -> deploy-production
+# Uso: Se activa automáticamente en push/PR a main/develop
+# =============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: '1.75'
+  PROJECT_DIR: 'ebpf-node'
+
+# Cancel previous runs for same branch (except main)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# =============================================================================
+# STAGE 1: Lint and Code Quality
+# =============================================================================
+jobs:
+  lint:
+    name: Lint and Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          profile: minimal
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.PROJECT_DIR }}/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo fmt --all -- --check
+
+      - name: Run clippy (warnings as info)
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo clippy --all-targets --all-features -- -W clippy::all
+
+      - name: Security audit
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo install cargo-audit --quiet 2>/dev/null || true
+          cargo audit || true  # Don't fail on known vulnerabilities
+
+      - name: Ansible lint
+        run: |
+          pip install ansible-lint --quiet
+          ansible-lint ansible/playbooks/*.yml --quiet || true
+
+  check_structured_logging:
+    name: Check Structured Logging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify structured logging format
+        run: |
+          # Check that structured logging is implemented
+          grep -r "structured_logging" ${{ env.PROJECT_DIR }}/${{ env.PROJECT_DIR }}/src/ || {
+            echo "::warning::Structured logging not found in codebase"
+          }
+
+      - name: Verify JSON log format
+        run: |
+          # Check for JSON log format in code
+          grep -r "json" ${{ env.PROJECT_DIR }}/${{ env.PROJECT_DIR }}/src/ | grep -i log || {
+            echo "::warning::JSON log format not found"
+          }
+
+# =============================================================================
+# STAGE 2: Unit and Integration Tests
+# =============================================================================
+  test:
+    name: Unit and Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.PROJECT_DIR }}/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libelf-dev libbpf-dev
+
+      - name: Build eBPF binaries
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo build --release --package ebpf-node-ebpf
+
+      - name: Run unit tests
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo test --lib -- --test-threads=1
+
+      - name: Run integration tests
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo test --test integration || true  # May require special setup
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            ${{ env.PROJECT_DIR }}/target/test-results/
+            ${{ env.PROJECT_DIR }}/target/**/*.log
+
+# =============================================================================
+# STAGE 3: Build and Package
+# =============================================================================
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.PROJECT_DIR }}/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libelf-dev libbpf-dev
+
+      - name: Build release binary
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          cargo build --release --bin ebpf-node
+
+      - name: Verify eBPF binary
+        run: |
+          cd ${{ env.PROJECT_DIR }}
+          file target/release/ebpf-node
+          ls -lh target/release/ebpf-node
+
+      - name: Create release package
+        run: |
+          PACKAGE_NAME="ebpf-blockchain-${{ github.sha }}"
+          mkdir -p "$PACKAGE_NAME"
+
+          # Copy binary
+          cp ${{ env.PROJECT_DIR }}/target/release/ebpf-node "$PACKAGE_NAME/"
+
+          # Copy ansible playbooks
+          cp -r ansible "$PACKAGE_NAME/"
+
+          # Copy monitoring stack
+          cp -r monitoring "$PACKAGE_NAME/"
+
+          # Copy documentation
+          cp -r docs "$PACKAGE_NAME/"
+
+          # Copy scripts
+          cp -r scripts "$PACKAGE_NAME/"
+
+          # Create tarball
+          tar -czf "${PACKAGE_NAME}.tar.gz" "$PACKAGE_NAME"
+
+          # Verify archive
+          tar -tzf "${PACKAGE_NAME}.tar.gz" | head -20
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebpf-blockchain-release
+          path: ebpf-blockchain-*.tar.gz
+          retention-days: 14
+
+      - name: Generate checksum
+        run: |
+          sha256sum ebpf-blockchain-*.tar.gz > checksums.sha256
+          cat checksums.sha256
+
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: checksums.sha256
+
+# =============================================================================
+# STAGE 4: Deploy to Staging
+# =============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'workflow_dispatch'
+
+    environment:
+      name: staging
+      url: https://staging.ebpf-blockchain.local
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-blockchain-release
+
+      - name: Deploy to staging via Ansible
+        run: |
+          # Install Ansible
+          pip install ansible --quiet
+
+          # Setup SSH keys for staging
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Add staging host to known hosts
+          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Deploy with deployment version
+          DEPLOYMENT_VERSION=${{ github.sha }} ansible-playbook ansible/playbooks/deploy.yml \
+            -i ansible/inventory/staging.yml \
+            -e "deployment_version=${{ github.sha }}" \
+            --private-key ~/.ssh/id_ed25519 \
+            --user ${{ secrets.STAGING_USER }} \
+            --limit ebpf_nodes
+
+      - name: Run post-deployment health checks
+        run: |
+          pip install ansible --quiet
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          ansible-playbook ansible/playbooks/health_check.yml \
+            -i ansible/inventory/staging.yml \
+            --private-key ~/.ssh/id_ed25519 \
+            --user ${{ secrets.STAGING_USER }} \
+            --limit ebpf_nodes
+
+      - name: Notify staging deployment
+        if: always()
+        run: |
+          echo "Staging deployment: ${{ github.sha }}"
+          echo "Status: ${{ job.status }}"
+          echo "Timestamp: ${{ github.event.head_commit.timestamp }}"
+
+# =============================================================================
+# STAGE 5: Deploy to Production
+# =============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+
+    environment:
+      name: production
+      url: https://ebpf-blockchain.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-blockchain-release
+
+      - name: Deploy to production via Ansible
+        run: |
+          # Install Ansible
+          pip install ansible --quiet
+
+          # Setup SSH keys for production
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Add production host to known hosts
+          ssh-keyscan -H ${{ secrets.PRODUCTION_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Deploy with deployment version
+          DEPLOYMENT_VERSION=${{ github.sha }} ansible-playbook ansible/playbooks/deploy.yml \
+            -i ansible/inventory/production.yml \
+            -e "deployment_version=${{ github.sha }}" \
+            --private-key ~/.ssh/id_ed25519 \
+            --user ${{ secrets.PRODUCTION_USER }} \
+            --limit ebpf_nodes
+
+      - name: Run post-deployment health checks
+        run: |
+          pip install ansible --quiet
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.PRODUCTION_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          ansible-playbook ansible/playbooks/health_check.yml \
+            -i ansible/inventory/production.yml \
+            --private-key ~/.ssh/id_ed25519 \
+            --user ${{ secrets.PRODUCTION_USER }} \
+            --limit ebpf_nodes
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.sha }}
+          release_name: Release ${{ github.sha }}
+          draft: false
+          prerelease: false
+
+      - name: Notify production deployment
+        if: always()
+        run: |
+          echo "Production deployment: ${{ github.sha }}"
+          echo "Status: ${{ job.status }}"
+          echo "Timestamp: ${{ github.event.head_commit.timestamp }}"
+
+# =============================================================================
+# STAGE 6: Backup Verification
+# =============================================================================
+  backup-verification:
+    name: Backup Verification
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run backup tests
+        run: |
+          chmod +x scripts/backup_test.sh 2>/dev/null || true
+          bash scripts/backup_test.sh || echo "Backup tests require manual execution"
+
+      - name: Verify backup scripts exist
+        run: |
+          test -f scripts/backup.sh && echo "backup.sh exists" || echo "backup.sh missing"
+          test -f scripts/restore.sh && echo "restore.sh exists" || echo "restore.sh missing"

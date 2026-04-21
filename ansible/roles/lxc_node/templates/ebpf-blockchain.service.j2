@@ -1,0 +1,36 @@
+[Unit]
+Description=eBPF Blockchain Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/ebpf-blockchain
+ExecStart=/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node --iface {{ ansible_default_ipv4.interface | default('eth0') }}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ebpf-blockchain
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resources
+LimitNOFILE=65535
+LimitMEMLOCK=Infinity
+
+# Environment
+Environment=RUST_LOG=info
+Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
