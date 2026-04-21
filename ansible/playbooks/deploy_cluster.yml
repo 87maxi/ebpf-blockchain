@@ -33,6 +33,20 @@
         out_interface: lxdbr1
         jump: ACCEPT
       become: true
+
+    - name: Allow all traffic for P2P communication
+      iptables:
+        chain: FORWARD
+        jump: ACCEPT
+      become: true
+
+    - name: Configure iptables for P2P ports
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 50000
+        jump: ACCEPT
+      become: true
     - name: Launch LXC nodes
       shell: |
         if ! lxc info ebpf-node-{{ item }} >/dev/null 2>&1; then

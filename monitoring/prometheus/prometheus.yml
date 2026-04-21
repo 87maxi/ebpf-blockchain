@@ -1,45 +1,58 @@
 global:
-  scrape_interval: 5s
+  scrape_interval: 15s
   evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  # External labels para cluster awareness
   external_labels:
-    cluster: 'ebpf-blockchain'
+    cluster: 'ebpf-blockchain-lab'
     environment: 'development'
 
+# Alertas configuradas
+rule_files:
+  - 'alerts.yml'
+
+# Scrape configs
+scrape_configs:
+  # eBPF Node metrics
+  - job_name: 'ebpf-node'
+    static_configs:
+      - targets:
+          - 'host1:9090'
+          - 'host2:9090'
+          - 'host3:9090'
+        labels:
+          group: 'ebpf-cluster'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          group: 'monitoring'
+
+  # Node Exporter (system metrics from host)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets:
+          - 'host1:9100'
+          - 'host2:9100'
+          - 'host3:9100'
+        labels:
+          group: 'ebpf-cluster'
+
+  # Grafana dashboard monitoring
+  - job_name: 'grafana'
+    static_configs:
+      - targets:
+          - 'grafana:3000'
+        labels:
+          group: 'monitoring'
+
+# Alertmanager configuration
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: 'ebpf_nodes'
-    static_configs:
-      - targets: ['192.168.2.11:9090']
-        labels:
-          node_name: 'ebpf-node-1'
-          node_type: 'ebpf'
-      - targets: ['192.168.2.12:9090']
-        labels:
-          node_name: 'ebpf-node-2'
-          node_type: 'ebpf'
-      - targets: ['192.168.2.13:9090']
-        labels:
-          node_name: 'ebpf-node-3'
-          node_type: 'ebpf'
-
-  - job_name: 'attacker_nodes'
-    static_configs:
-      - targets: ['192.168.2.221:9090']
-        labels:
-          node_name: 'ebpf-attacker-1'
-          node_type: 'attacker'
-
-  - job_name: 'victim_nodes'
-    static_configs:
-      - targets: ['192.168.2.231:9090']
-        labels:
-          node_name: 'ebpf-victim-1'
-          node_type: 'victim'
+        - targets:
+          - 'alertmanager:9093'

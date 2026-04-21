@@ -1,69 +1,186 @@
 version: '3.8'
 
 services:
+  # =====================
+  # PROMETHEUS - Metrics Storage & Alerting
+  # =====================
   prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
+    image: prom/prometheus:v2.48.0
+    container_name: ebpf-prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--storage.tsdb.retention.time=15d'
+      - '--storage.tsdb.retention.size=10GB'
       - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--alertmanager.url=http://alertmanager:9093'
     networks:
-      - monitoring
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # ALERTMANAGER - Alert Routing
+  # =====================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: ebpf-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.listen-address=0.0.0.0:9093'
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
+
+  # =====================
+  # GRAFANA - Visualization
+  # =====================
   grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
+    image: grafana/grafana:10.2.0
+    container_name: ebpf-grafana
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+      - grafana-config:/etc/grafana
     depends_on:
       - prometheus
+      - loki
+      - tempo
     networks:
-      - monitoring
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # LOKI - Log Aggregation
+  # =====================
   loki:
-    image: grafana/loki:latest
-    container_name: loki
+    image: grafana/loki:2.9.0
+    container_name: ebpf-loki
+    restart: unless-stopped
     ports:
       - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - monitoring
-
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
     volumes:
-      - /tmp:/var/log/nodes
-      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
-    command: -config.file=/etc/promtail/config.yml
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    command:
+      - '-config.file=/etc/loki/loki-config.yml'
     networks:
-      - monitoring
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
+
+  # =====================
+  # PROMTAIL - Log Collector
+  # =====================
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: ebpf-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+      - promtail-data:/tmp/promtail
+    command:
+      - '-config.file=/etc/promtail/promtail-config.yml'
     depends_on:
       - loki
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
 
-networks:
-  monitoring:
-    driver: bridge
+  # =====================
+  # TEMPO - Distributed Tracing
+  # =====================
+  tempo:
+    image: grafana/tempo:2.3.0
+    container_name: ebpf-tempo
+    restart: unless-stopped
+    ports:
+      - "3200:3200"   # HTTP (ingest + query)
+      - "9097:9097"   # gRPC
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo-data:/tmp/tempo
+    command:
+      - '-config.file=/etc/tempo/tempo-config.yml'
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
+
+  # =====================
+  # NODE EXPORTER - System Metrics
+  # =====================
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: ebpf-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
 
 volumes:
-  prometheus_data:
-  grafana_data:
+  prometheus-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  grafana-data:
+    driver: local
+  grafana-config:
+    driver: local
+  loki-data:
+    driver: local
+  promtail-data:
+    driver: local
+  tempo-data:
+    driver: local
+
+networks:
+  ebpf-observability:
+    driver: bridge
+    name: ebpf-observability

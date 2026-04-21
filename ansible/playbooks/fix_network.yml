@@ -1,9 +1,9 @@
----
-- name: Fix LXC Bridge Connectivity
+po---
+- name: Fix LXC Bridge Connectivity for P2P Communication
   hosts: localhost
   become: true
   tasks:
-    - name: Allow traffic on lxdbr1 bridge
+    - name: Allow traffic on lxdbr1 bridge for P2P communication
       iptables:
         chain: FORWARD
         in_interface: lxdbr1
@@ -24,4 +24,66 @@
         out_interface: lxdbr1
         ctstate: ESTABLISHED,RELATED
         jump: ACCEPT
+      ignore_errors: true
+
+    - name: Enable IP forwarding for proper routing
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: yes
+
+    - name: Allow all traffic for LXD containers
+      iptables:
+        chain: FORWARD
+        in_interface: lxdbr1
+        out_interface: lxdbr1
+        jump: ACCEPT
+
+    - name: Allow all traffic from LXD bridge
+      iptables:
+        chain: FORWARD
+        in_interface: lxdbr1
+        jump: ACCEPT
+
+    - name: Allow all traffic to LXD bridge
+      iptables:
+        chain: FORWARD
+        out_interface: lxdbr1
+        jump: ACCEPT
+
+    - name: Configure NAT for LXD bridge
+      iptables:
+        chain: POSTROUTING
+        table: nat
+        in_interface: lxdbr1
+        jump: MASQUERADE
+      ignore_errors: true
+
+    - name: Add specific rule for P2P ports (50000)
+      iptables:
+        chain: INPUT
+        in_interface: lxdbr1
+        protocol: tcp
+        destination_port: 50000
+        jump: ACCEPT
+
+    - name: Add specific rule for P2P ports (50000) UDP
+      iptables:
+        chain: INPUT
+        in_interface: lxdbr1
+        protocol: udp
+        destination_port: 50000
+        jump: ACCEPT
+
+    - name: Configure Docker bridge for container communication
+      shell: |
+        if docker network ls | grep -q lxdbr1; then
+          docker network create --driver bridge --subnet=192.168.2.0/24 lxdbr1 || true
+        fi
+      ignore_errors: true
+
+    - name: Restart iptables to apply changes
+      shell: |
+        systemctl restart netfilter-persistent || systemctl restart iptables
       ignore_errors: true
