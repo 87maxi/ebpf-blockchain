@@ -224,18 +224,41 @@ async fn main() -> anyhow::Result<()> {
     // Setup HTTP API
     let app = api::router::create_router(node_state_arc.clone(), tx_rpc, tx_ws);
     
-    // Spawn HTTP server
+    // Spawn Prometheus metrics server (port 9090)
     let metrics_port_clone = metrics_port;
+    let metrics_state = node_state_arc.clone();
     tokio::spawn(async move {
         let bind_addr = format!("0.0.0.0:{}", metrics_port_clone);
         if let Ok(listener) = tokio::net::TcpListener::bind(&bind_addr).await {
-            info!("REST API server listening on {} (health, metrics, api, rpc, ws)", bind_addr);
+            info!("Prometheus metrics server listening on {}", bind_addr);
+            if let Err(e) = axum::serve(listener, api::router::create_metrics_router(metrics_state)).await {
+                error!("Prometheus metrics server error: {}", e);
+            }
+        } else {
+            warn!("Failed to bind Prometheus metrics to {}. Trying fallback ports...", bind_addr);
+            for fallback_port in [9091, 9092, 8080, 3000] {
+                let fallback_addr = format!("0.0.0.0:{}", fallback_port);
+                if let Ok(listener) = tokio::net::TcpListener::bind(&fallback_addr).await {
+                    info!("Prometheus metrics server listening on {} (fallback)", fallback_addr);
+                    let _ = axum::serve(listener, api::router::create_metrics_router(metrics_state.clone())).await;
+                    break;
+                }
+            }
+        }
+    });
+    
+    // Spawn REST API server (port 9091)
+    let rpc_port_clone = rpc_port;
+    tokio::spawn(async move {
+        let bind_addr = format!("0.0.0.0:{}", rpc_port_clone);
+        if let Ok(listener) = tokio::net::TcpListener::bind(&bind_addr).await {
+            info!("REST API server listening on {} (health, api, rpc, ws)", bind_addr);
             if let Err(e) = axum::serve(listener, app).await {
-                error!("Axum server error: {}", e);
+                error!("REST API server error: {}", e);
             }
         } else {
             warn!("Failed to bind REST API to {}. Trying fallback ports...", bind_addr);
-            for fallback_port in [9091, 9092, 8080, 3000] {
+            for fallback_port in [9092, 8080, 3000, 8081] {
                 let fallback_addr = format!("0.0.0.0:{}", fallback_port);
                 if let Ok(listener) = tokio::net::TcpListener::bind(&fallback_addr).await {
                     info!("REST API server listening on {} (fallback)", fallback_addr);

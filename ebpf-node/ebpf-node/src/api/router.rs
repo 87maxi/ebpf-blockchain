@@ -39,3 +39,15 @@ pub fn create_router(
         .route("/ws", get(crate::api::ws::ws_handler))
         .with_state(node_state_clone)
 }
+
+/// Create a router with ONLY Prometheus metrics endpoint (no API routes)
+/// This is used for the dedicated metrics server on port 9090
+pub fn create_metrics_router(
+    state: Arc<NodeState>,
+) -> Router {
+    Router::new()
+        // Prometheus metrics only
+        .route("/metrics", get(crate::api::metrics::metrics_handler))
+        .route("/", get(crate::api::metrics::metrics_handler))
+        .with_state(state)
+}
