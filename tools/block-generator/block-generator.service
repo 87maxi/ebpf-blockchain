@@ -1,0 +1,25 @@
+[Unit]
+Description=eBPF Blockchain Block Generator Service
+Documentation=https://github.com/your-org/ebpf-blockchain
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maxi
+ExecStart=/home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/venv/bin/python3 /home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/block_generator.py --nodes 192.168.2.210,192.168.2.211,192.168.2.212 --interval 5 --batch-size 3 --sender block-generator
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ebpf-block-generator
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target
