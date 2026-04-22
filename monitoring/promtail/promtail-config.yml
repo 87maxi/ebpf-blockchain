@@ -19,6 +19,20 @@ scrape_configs:
           job: ebpf-node-logs
           __path__: /var/log/ebpf-node/*.log
           cluster: ebpf-blockchain-lab
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            message: message
+            component: component
+            timestamp: timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          event:
+          component:
 
   # Docker container logs
   - job_name: docker-logs
@@ -28,6 +42,12 @@ scrape_configs:
         labels:
           job: docker-logs
           __path__: /var/lib/docker/containers/*/*.log
+    pipeline_stages:
+      - regex:
+          expression: ".*(?P<level>(INFO|WARN|ERROR|DEBUG)).*"
+      - timestamp:
+          format: RFC3339Nano
+          source: time
 
   # System logs
   - job_name: system-logs
@@ -46,48 +66,3 @@ scrape_configs:
         labels:
           job: prometheus-logs
           __path__: /prometheus/*.log
-
-# Pipeline configurations for log processing
-pipeline_stages:
-  # Common stage for all jobs
-  - match:
-      filter:
-        stream!~ "err|warn"
-      stages:
-        - json:
-            expressions:
-              level: level
-              message: message
-              component: component
-              timestamp: timestamp
-
-  # eBPF specific log processing
-  - match:
-      filter:
-        job = "ebpf-node-logs"
-      stages:
-        - json:
-            expressions:
-              level: level
-              message: message
-              tx_id: tx_id
-              peer_id: peer_id
-              event: event
-        - timestamp:
-            source: timestamp
-            format: RFC3339Nano
-        - labels:
-            level:
-            event:
-            component:
-
-  # Docker log processing
-  - match:
-      filter:
-        job = "docker-logs"
-      stages:
-        - regex:
-            expression: ".*(?P<level>(INFO|WARN|ERROR|DEBUG)).*"
-        - timestamp:
-            format: RFC3339Nano
-            source: time

@@ -1,10 +1,3 @@
-global:
-  resolve_timeout: 5m
-  smtp_smarthost: '${SMTP_HOST:-localhost:25}'
-  smtp_from: '${SMTP_FROM:-ebpf-alerts@example.com}'
-  smtp_auth_username: '${SMTP_USERNAME:-}'
-  smtp_auth_password: '${SMTP_PASSWORD:-}'
-
 route:
   # Default receiver for alerts
   receiver: 'default-receiver'
@@ -38,26 +31,20 @@ receivers:
       - url: 'http://localhost:9090/webhook'
         send_resolved: true
 
-  # Critical alerts - email + webhook
+  # Critical alerts - webhook only
   - name: 'critical-alerts'
-    email_configs:
-      - to: '${ALERT_EMAIL:-ops@example.com}'
-        send_resolved: true
-        html: '{{ template "email.default.html" . }}'
-        headers:
-          Subject: '{{ "🚨 CRITICAL: {{ .CommonAnnotations.summary }}" }}'
     webhook_configs:
       - url: 'http://localhost:9090/webhook'
         send_resolved: true
 
-  # Warning alerts - webhook only
+  # Warning alerts - logs only
   - name: 'warning-alerts'
     webhook_configs:
       - url: 'http://localhost:9090/webhook'
         send_resolved: true
 
 inhibit_rules:
-  # Inhibit warning alerts when critical alerts are firing for same alertname
+  # Inhibit warning alerts if critical alerts are firing
   - source_match:
       severity: 'critical'
     target_match:

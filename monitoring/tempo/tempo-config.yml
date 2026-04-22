@@ -4,69 +4,15 @@ server:
 
 distributor:
   receivers:
-    jaeger:
-      protocols:
-        thrift_http:
-        grpc:
     otlp:
       protocols:
         http:
           endpoint: "0.0.0.0:4318"
         grpc:
           endpoint: "0.0.0.0:4317"
-    zipkin:
 
 storage:
   trace:
     backend: local
     local:
       path: /tmp/tempo/blocks
-    wal:
-      path: /tmp/tempo/wal
-
-# Flow pipeline for processing traces
-flow:
-  pipeline:
-    trace:
-      receivers:
-        - otlp:
-            protocols:
-              http:
-              grpc:
-      processors:
-        - batch:
-            timeout: 5s
-            send_batch_size: 1000
-      exporters:
-        - local:
-            path: /tmp/tempo/blocks
-
-# Metrics generator for trace-based metrics
-metrics_generator:
-  registry:
-    external_labels:
-      source: tempo
-      cluster: ebpf-blockchain-lab
-  processor:
-    service_graphs:
-      enabled: true
-    span_metrics:
-      enabled: true
-      dimensions:
-        - service.name
-        - span.status
-        - span.type
-  storage:
-    path: /tmp/tempo/gen
-    backend: local
-
-# Search settings
-search:
-  enabled: true
-  nested_field_size_limit: 10000000
-
-# Trace retention
-retention:
-  trace_batch_header_size: 5000
-  trace_batch_size: 10000
-  trace_global_retention_period: 720h  # 30 days
