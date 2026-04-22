@@ -21,13 +21,30 @@ alerting:
 
 # Scrape configs
 scrape_configs:
-  # eBPF Node metrics
-  - job_name: 'ebpf-node'
+  # eBPF Node metrics - 3 nodes
+  - job_name: 'ebpf-node-1'
     static_configs:
       - targets:
-          - 'localhost:9090'
+          - '192.168.2.210:9090'
         labels:
           group: 'ebpf-cluster'
+          node: 'node-1'
+
+  - job_name: 'ebpf-node-2'
+    static_configs:
+      - targets:
+          - '192.168.2.211:9090'
+        labels:
+          group: 'ebpf-cluster'
+          node: 'node-2'
+
+  - job_name: 'ebpf-node-3'
+    static_configs:
+      - targets:
+          - '192.168.2.212:9090'
+        labels:
+          group: 'ebpf-cluster'
+          node: 'node-3'
 
   # Prometheus self-monitoring
   - job_name: 'prometheus'
@@ -39,6 +56,7 @@ scrape_configs:
 
   # Node Exporter (system metrics from host)
   - job_name: 'node-exporter'
+    metrics_path: '/metrics'
     static_configs:
       - targets:
           - 'localhost:9100'
@@ -47,6 +65,7 @@ scrape_configs:
 
   # Grafana dashboard monitoring
   - job_name: 'grafana'
+    metrics_path: '/metrics'
     static_configs:
       - targets:
           - 'localhost:3000'

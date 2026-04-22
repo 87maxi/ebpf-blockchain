@@ -1,4 +1,6 @@
 {
+  "overwrite": true,
+  "title": "eBPF Network P2P",
   "annotations": {
     "list": [
       {
@@ -64,7 +66,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -123,7 +127,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -174,7 +180,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -225,7 +233,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -276,7 +286,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -327,7 +339,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -952,7 +966,11 @@
   "refresh": "10s",
   "schemaVersion": 30,
   "style": "dark",
-  "tags": ["network", "p2p", "ebpf-blockchain"],
+  "tags": [
+    "network",
+    "p2p",
+    "ebpf-blockchain"
+  ],
   "templating": {
     "list": []
   },
@@ -962,7 +980,6 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "eBPF Network P2P",
   "uid": "ebpf-network-p2p",
   "version": 1
 }

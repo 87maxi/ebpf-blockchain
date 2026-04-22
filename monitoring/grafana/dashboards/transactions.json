@@ -1,4 +1,6 @@
 {
+  "overwrite": true,
+  "title": "eBPF Transactions",
   "annotations": {
     "list": [
       {
@@ -64,7 +66,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -115,7 +119,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -166,7 +172,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -217,7 +225,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -268,7 +278,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -319,7 +331,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -970,7 +984,10 @@
   "refresh": "10s",
   "schemaVersion": 30,
   "style": "dark",
-  "tags": ["transactions", "ebpf-blockchain"],
+  "tags": [
+    "transactions",
+    "ebpf-blockchain"
+  ],
   "templating": {
     "list": []
   },
@@ -980,7 +997,6 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "eBPF Transactions",
   "uid": "ebpf-transactions",
   "version": 1
 }
