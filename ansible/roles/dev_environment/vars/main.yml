@@ -1,0 +1,29 @@
+---
+# Variables específicas para el entorno de desarrollo
+
+dev_environment:
+  prometheus_port: 9090
+  grafana_port: 3000
+  loki_port: 3100
+  tempo_port: 3200
+  promtail_port: 9080
+  alertmanager_port: 9093
+  
+  prometheus_config_path: "{{ project_dir }}/dev-environment/monitoring/prometheus"
+  grafana_config_path: "{{ project_dir }}/dev-environment/monitoring/grafana"
+  loki_config_path: "{{ project_dir }}/dev-environment/monitoring/loki"
+  tempo_config_path: "{{ project_dir }}/dev-environment/monitoring/tempo"
+  promtail_config_path: "{{ project_dir }}/dev-environment/monitoring/promtail"
+  
+  docker_compose_version: "2.21.0"
+  
+  # Configuración específica para desarrollo
+  dev_mode: true
+  debug_enabled: true
+  log_level: "debug"
+  
+  # Retención de datos para desarrollo
+  prometheus_retention_time: "15d"
+  prometheus_retention_size: "10GB"
+  loki_retention_period: "720h"
+  tempo_retention_period: "720h"

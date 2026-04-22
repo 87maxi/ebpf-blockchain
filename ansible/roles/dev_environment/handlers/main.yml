@@ -1,0 +1,14 @@
+---
+# Handlers para el rol dev_environment
+
+- name: Restart docker
+  service:
+    name: docker
+    state: restarted
+
+- name: Reload docker compose
+  shell: |
+    cd {{ project_dir }}/dev-environment
+    docker compose down
+    docker compose up -d
+  changed_when: true

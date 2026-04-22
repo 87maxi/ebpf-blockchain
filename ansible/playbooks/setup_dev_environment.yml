@@ -1,0 +1,11 @@
+---
+# Playbook para configurar ambiente de desarrollo local
+- name: Configurar ambiente de desarrollo local
+  hosts: localhost
+  gather_facts: true
+  vars:
+    ansible_connection: local
+    project_dir: "{{ lookup('env', 'HOME') }}/Documentos/source/ebpf-blockchain"
+  roles:
+    - dev_environment
+  become: false

@@ -1,0 +1,70 @@
+---
+# Tasks para el rol dev_environment
+
+- name: Verificar instalación de Docker
+  command: which docker
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Instalar Docker si no está presente
+  apt:
+    name:
+      - docker.io
+      - docker-compose
+    state: present
+  when: docker_check.rc != 0
+
+- name: Crear directorios para desarrollo
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ project_dir }}/dev-environment"
+    - "{{ project_dir }}/dev-environment/logs"
+    - "{{ project_dir }}/dev-environment/data"
+    - "{{ project_dir }}/dev-environment/monitoring"
+  changed_when: false
+
+- name: Copiar configuración de observabilidad para desarrollo
+  copy:
+    src: "{{ item }}"
+    dest: "{{ project_dir }}/dev-environment/monitoring/{{ item }}"
+    mode: '0644'
+  loop:
+    - prometheus
+    - grafana
+    - loki
+    - tempo
+    - promtail
+  when: "'dev_environment' in group_names"
+  ignore_errors: true
+
+- name: Configurar Docker Compose para desarrollo
+  template:
+    src: docker-compose.dev.yml.j2
+    dest: "{{ project_dir }}/dev-environment/docker-compose.yml"
+    mode: '0644'
+  register: compose_template
+
+- name: Iniciar servicios de desarrollo
+  shell: |
+    cd {{ project_dir }}/dev-environment
+    docker compose up -d
+  when: compose_template.changed
+  changed_when: true
+  ignore_errors: true
+
+- name: Esperar a que Prometheus esté listo
+  wait_for:
+    port: "{{ dev_environment.prometheus_port }}"
+    host: localhost
+    timeout: 60
+  ignore_errors: true
+
+- name: Esperar a que Grafana esté listo
+  wait_for:
+    port: "{{ dev_environment.grafana_port }}"
+    host: localhost
+    timeout: 60
+  ignore_errors: true

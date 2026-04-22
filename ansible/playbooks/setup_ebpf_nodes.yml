@@ -1,0 +1,356 @@
+---
+# =============================================================================
+# Setup eBPF Nodes - Peer Configuration and Node Startup
+# Instala Rust, copia código, construye e inicia nodos eBPF
+# con configuración de peers para consensus
+# Uso: ansible-playbook playbooks/setup_ebpf_nodes.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: Configure network and DNS on all nodes
+  hosts: lxc_nodes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Configure default route
+      shell: ip route add default via 192.168.2.1 2>/dev/null || echo "Route already exists"
+      changed_when: false
+
+    - name: Configure DNS servers
+      copy:
+        content: |
+          nameserver 8.8.8.8
+          nameserver 8.8.4.4
+        dest: /etc/resolv.conf
+        mode: "0644"
+
+    - name: Verify DNS resolution
+      shell: ping -c 1 -w 3 google.com 2>&1 | head -1
+      register: dns_check
+      changed_when: false
+
+    - name: Display DNS check result
+      debug:
+        msg: "DNS resolution: {{ dns_check.stdout | default('failed') }}"
+
+- name: Install Rust on all nodes
+  hosts: lxc_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    ebpf_project_dir: "/root/ebpf-blockchain"
+    ebpf_node_dir: "{{ ebpf_project_dir }}/ebpf-node"
+
+  tasks:
+    - name: Check if Rust is installed
+      command: rustc --version
+      register: rust_version
+      changed_when: false
+      failed_when: false
+
+    - name: Install Rust if not present
+      shell: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
+        echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+        . ~/.cargo/env
+        rustc --version
+      register: rust_install_result
+      changed_when: rust_install_result.rc == 0
+      when: rust_version.rc != 0
+
+    - name: Verify Rust installation
+      shell: |
+        . ~/.cargo/env
+        rustc --version
+        rustup show
+      register: rust_verify
+      changed_when: false
+
+    - name: Install nightly toolchain with rust-src
+      shell: |
+        . ~/.cargo/env
+        rustup toolchain install nightly --component rust-src
+      args:
+        creates: "{{ ansible_env.HOME }}/.rustup/toolchains/nightly"
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install C compiler and build tools (required for bpf-linker and bindgen)
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - build-essential
+        - pkg-config
+        - libssl-dev
+        - libclang-dev
+        - git
+
+    - name: Install bpf-linker (required for eBPF build)
+      shell: |
+        . ~/.cargo/env
+        cargo install bpf-linker
+      args:
+        creates: "{{ ansible_env.HOME }}/.cargo/bin/bpf-linker"
+
+- name: Copy eBPF source code to all nodes
+  hosts: lxc_nodes
+  gather_facts: false
+
+  vars:
+    ebpf_project_dir: "/root/ebpf-blockchain"
+    ebpf_node_dir: "{{ ebpf_project_dir }}/ebpf-node"
+    src_root: "/home/maxi/Documentos/source/ebpf-blockchain"
+
+  tasks:
+    - name: Create project directory
+      file:
+        path: "{{ ebpf_project_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy entire project from host to nodes
+      ansible.posix.synchronize:
+        src: "{{ src_root }}/"
+        dest: "{{ ebpf_project_dir }}/"
+        delete: true
+        rsync_opts:
+          - "--exclude=target"
+          - "--exclude=.git"
+          - "--exclude=*.log"
+          - "--exclude=.vscode"
+      become: true
+
+    - name: Copy ebpf-node directory
+      ansible.posix.synchronize:
+        src: "{{ src_root }}/ebpf-node/"
+        dest: "{{ ebpf_node_dir }}/"
+        delete: true
+        rsync_opts:
+          - "--exclude=target"
+          - "--exclude=.git"
+      become: true
+
+    - name: Verify source code structure
+      stat:
+        path: "{{ ebpf_node_dir }}/Cargo.toml"
+      register: cargo_toml
+      failed_when: not cargo_toml.stat.exists
+
+- name: Build eBPF node in release mode
+  hosts: lxc_nodes
+  become: true
+
+  vars:
+    ebpf_project_dir: "/root/ebpf-blockchain"
+    ebpf_node_dir: "{{ ebpf_project_dir }}/ebpf-node"
+    ebpf_node_bin: "{{ ebpf_node_dir }}/target/release/ebpf-node"
+
+  tasks:
+    - name: Build eBPF node (release mode)
+      shell: |
+        . /root/.cargo/env
+        cd {{ ebpf_node_dir }}
+        cargo build --release --bin ebpf-node
+      args:
+        creates: "{{ ebpf_node_bin }}"
+      register: cargo_build
+      changed_when: cargo_build.rc == 0
+      timeout: 3600
+
+    - name: Verify binary exists
+      stat:
+        path: "{{ ebpf_node_bin }}"
+      register: binary_check
+      failed_when: not binary_check.stat.exists
+
+    - name: Make binary executable
+      file:
+        path: "{{ ebpf_node_bin }}"
+        mode: "0755"
+
+    - name: Create data and log directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /var/lib/ebpf-blockchain
+        - /var/log/ebpf-blockchain
+
+- name: Configure and start eBPF peers
+  hosts: lxc_nodes
+  become: true
+  serial: 1
+
+  vars:
+    ebpf_node_bin: "/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node"
+    node1_ipv4: "192.168.2.210"
+    node2_ipv4: "192.168.2.211"
+    node3_ipv4: "192.168.2.212"
+    p2p_port: "50000"
+
+  tasks:
+    - name: Configure Node 1 as master (first node)
+      when:
+        - inventory_hostname == 'ebpf-node-1'
+        - item == 0
+      block:
+        - name: Start Node 1 as master node
+          shell: |
+            pkill ebpf-node 2>/dev/null || true
+            sleep 2
+            nohup {{ ebpf_node_bin }} --iface eth0 \
+              --listen-addresses /ip4/0.0.0.0/tcp/{{ p2p_port }},/ip4/0.0.0.0/udp/{{ p2p_port }}/quic-v1 \
+              > /tmp/ebpf-node-1.log 2>&1 &
+            echo $! > /tmp/ebpf-node-1.pid
+            sleep 8
+
+        - name: Extract peer ID from Node 1 logs
+          shell: |
+            grep -oP 'PeerId: \K[a-zA-Z0-9]+' /tmp/ebpf-node-1.log | head -1
+          register: node1_peer_id
+          changed_when: false
+
+        - name: Save Node 1 peer ID
+          copy:
+            content: "{{ node1_peer_id.stdout | default('unknown') }}"
+            dest: /tmp/peer_id.txt
+            mode: "0644"
+
+        - name: Display Node 1 status
+          debug:
+            msg: "Node 1 started as master. Peer ID: {{ node1_peer_id.stdout | default('unknown') }}"
+
+    - name: Configure Node 2 as slave (second node)
+      when:
+        - inventory_hostname == 'ebpf-node-2'
+        - item == 1
+      block:
+        - name: Get Node 1 peer ID from master
+          ansible.builtin.fetch:
+            src: /tmp/peer_id.txt
+            dest: /tmp/node1_peer_id_fetched.txt
+            flat: true
+          delegate_to: ebpf-node-1
+          run_once: true
+
+        - name: Read Node 1 peer ID
+          shell: cat /tmp/node1_peer_id_fetched.txt
+          register: peer_id_1
+          changed_when: false
+
+        - name: Start Node 2 with bootstrap peer
+          shell: |
+            pkill ebpf-node 2>/dev/null || true
+            sleep 2
+            nohup {{ ebpf_node_bin }} --iface eth0 \
+              --listen-addresses /ip4/0.0.0.0/tcp/{{ p2p_port }},/ip4/0.0.0.0/udp/{{ p2p_port }}/quic-v1 \
+              --bootstrap-peers /ip4/{{ node1_ipv4 }}/tcp/{{ p2p_port }}/p2p/{{ peer_id_1.stdout }} \
+              > /tmp/ebpf-node-2.log 2>&1 &
+            echo $! > /tmp/ebpf-node-2.pid
+            sleep 5
+
+        - name: Display Node 2 status
+          debug:
+            msg: "Node 2 started. Bootstrap peer: {{ peer_id_1.stdout | default('unknown') }}"
+
+    - name: Configure Node 3 as slave (third node)
+      when:
+        - inventory_hostname == 'ebpf-node-3'
+        - item == 2
+      block:
+        - name: Get Node 1 peer ID from master
+          ansible.builtin.fetch:
+            src: /tmp/peer_id.txt
+            dest: /tmp/node1_peer_id_fetched.txt
+            flat: true
+          delegate_to: ebpf-node-1
+          run_once: true
+
+        - name: Read Node 1 peer ID
+          shell: cat /tmp/node1_peer_id_fetched.txt
+          register: peer_id_1
+          changed_when: false
+
+        - name: Start Node 3 with bootstrap peer
+          shell: |
+            pkill ebpf-node 2>/dev/null || true
+            sleep 2
+            nohup {{ ebpf_node_bin }} --iface eth0 \
+              --listen-addresses /ip4/0.0.0.0/tcp/{{ p2p_port }},/ip4/0.0.0.0/udp/{{ p2p_port }}/quic-v1 \
+              --bootstrap-peers /ip4/{{ node1_ipv4 }}/tcp/{{ p2p_port }}/p2p/{{ peer_id_1.stdout }} \
+              > /tmp/ebpf-node-3.log 2>&1 &
+            echo $! > /tmp/ebpf-node-3.pid
+            sleep 5
+
+        - name: Display Node 3 status
+          debug:
+            msg: "Node 3 started. Bootstrap peer: {{ peer_id_1.stdout | default('unknown') }}"
+
+- name: Verify peer connectivity and consensus
+  hosts: lxc_nodes
+  become: true
+
+  vars:
+    metrics_port: "9090"
+    rpc_port: "9091"
+
+  tasks:
+    - name: Wait for all nodes to initialize
+      wait_for:
+        timeout: 15
+
+    - name: Check metrics endpoint
+      shell: |
+        sleep 10
+        curl -s --connect-timeout 5 http://localhost:{{ metrics_port }}/metrics
+      register: metrics_output
+      changed_when: false
+      retries: 5
+      delay: 3
+
+    - name: Display peer count metrics
+      debug:
+        msg: "{{ metrics_output.stdout_lines | select('search', 'ebpf_node_peers') | list | default(['no peer metrics yet']) }}"
+      when: metrics_output.stdout | default('') | length > 0
+
+    - name: Check RPC node info endpoint
+      shell: |
+        curl -s --connect-timeout 5 http://localhost:{{ rpc_port }}/api/v1/node/info
+      register: node_info
+      changed_when: false
+      retries: 3
+      delay: 5
+
+    - name: Display node info
+      debug:
+        msg: "{{ node_info.stdout | default('unavailable') }}"
+      when: node_info.stdout | default('') | length > 0
+
+    - name: Check network peers endpoint
+      shell: |
+        curl -s --connect-timeout 5 http://localhost:{{ rpc_port }}/api/v1/network/peers
+      register: peers_info
+      changed_when: false
+      retries: 3
+      delay: 5
+
+    - name: Display peers information
+      debug:
+        msg: "{{ peers_info.stdout | default('unavailable') }}"
+      when: peers_info.stdout | default('') | length > 0
+
+    - name: Show recent logs for peer connections
+      shell: |
+        grep -i 'peer\|bootstrap\|connect\|listen' /tmp/ebpf-node-{{ inventory_hostname }}.log | tail -10
+      register: peer_logs
+      changed_when: false
+
+    - name: Display peer connection logs
+      debug:
+        msg: "{{ peer_logs.stdout_lines | default(['no peer logs yet']) }}"
