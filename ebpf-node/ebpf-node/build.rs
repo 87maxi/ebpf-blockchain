@@ -1,27 +1,18 @@
-use anyhow::{Context as _, anyhow};
-use aya_build::Toolchain;
+use std::env;
 
-fn main() -> anyhow::Result<()> {
-    let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
-        .no_deps()
-        .exec()
-        .context("MetadataCommand::exec")?;
-    let ebpf_package = packages
-        .into_iter()
-        .find(|cargo_metadata::Package { name, .. }| name.as_str() == "ebpf-node-ebpf")
-        .ok_or_else(|| anyhow!("ebpf-node-ebpf package not found"))?;
-    let cargo_metadata::Package {
-        name,
-        manifest_path,
-        ..
-    } = ebpf_package;
-    let ebpf_package = aya_build::Package {
-        name: name.as_str(),
-        root_dir: manifest_path
-            .parent()
-            .ok_or_else(|| anyhow!("no parent for {manifest_path}"))?
-            .as_str(),
-        ..Default::default()
+fn main() {
+    // Check that bpf-linker is installed
+    if which::which("bpf-linker").is_err() {
+        panic!("bpf-linker is required to build this crate. Install it with: cargo install bpf-linker");
+    }
+
+    // Build the eBPF program using aya-build
+    let ebpf_pkg = aya_build::Package {
+        name: "ebpf-node-ebpf",
+        root_dir: "../ebpf-node-ebpf",
+        no_default_features: false,
+        features: &[],
     };
-    aya_build::build_ebpf([ebpf_package], Toolchain::default())
+
+    aya_build::build_ebpf([ebpf_pkg], aya_build::Toolchain::Nightly).expect("failed to build eBPF programs");
 }

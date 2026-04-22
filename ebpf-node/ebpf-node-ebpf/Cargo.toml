@@ -1,17 +1,20 @@
 [package]
 name = "ebpf-node-ebpf"
 version = "0.1.0"
-edition.workspace = true
+edition = "2021"
+
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 ebpf-node-common = { path = "../ebpf-node-common" }
 
 aya-ebpf = { workspace = true }
-aya-log-ebpf = { workspace = true }
+aya-log-ebpf = { version = "0.1.0" }
 network-types = { workspace = true }
 
 [build-dependencies]
 which = { workspace = true }
+aya-build = { version = "0.1.0" }
 
 [[bin]]
 name = "ebpf-node"
