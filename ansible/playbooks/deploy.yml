@@ -79,6 +79,7 @@
         - "{{ ebpf_data_dir }}"
         - "{{ ebpf_log_dir }}"
         - "{{ ebpf_log_dir }}/backups"
+        - "/var/log/ebpf-node"
 
     # ---- Build from Source ----
     - name: Clone/Pull repository
@@ -149,52 +150,6 @@
     - name: Run post-deployment health checks
       include_tasks: health_check.yml
       ignore_errors: yes
-
-  rescue:
-    - name: Deployment failed - trigger rollback
-      block:
-        - name: Log deployment failure
-          copy:
-            content: "{{ deployment_timestamp }} DEPLOYMENT FAILED: Rolling back\n"
-            dest: "{{ deployment_log }}"
-            mode: "0644"
-
-        - name: Stop potentially broken service
-          systemd:
-            name: ebpf-blockchain
-            state: stopped
-          ignore_errors: yes
-
-        - name: Backup current state before rollback
-          shell: |
-            if [ -d "{{ ebpf_data_dir }}" ]; then
-              tar -czf "{{ ebpf_log_dir }}/backups/pre_rollback_{{ deployment_timestamp }}.tar.gz" \
-                -C /var/lib ebpf-blockchain 2>/dev/null || true
-            fi
-
-        - name: Rollback to previous version
-          shell: |
-            # Find latest backup
-            LATEST_BACKUP=$(ls -t {{ ebpf_log_dir }}/backups/pre_rollback_*.tar.gz 2>/dev/null | head -1)
-            if [ -n "$LATEST_BACKUP" ]; then
-              tar -xzf "$LATEST_BACKUP" -C /
-              echo "Rolled back from $LATEST_BACKUP"
-            else
-              echo "No backup found for rollback"
-            fi
-          ignore_errors: yes
-
-        - name: Restart service after rollback
-          systemd:
-            name: ebpf-blockchain
-            state: restarted
-          ignore_errors: yes
-
-    - name: Record deployment failure
-      copy:
-        content: "{{ deployment_timestamp }} DEPLOYMENT COMPLETED WITH ERRORS - Manual review required\n"
-        dest: "{{ deployment_log }}"
-        mode: "0644"
 
   post_tasks:
     - name: Deployment summary
