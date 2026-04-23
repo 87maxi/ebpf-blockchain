@@ -7,7 +7,7 @@
 # =============================================================================
 
 - name: Deploy eBPF Blockchain Node
-  hosts: ebpf_nodes
+  hosts: lxc_nodes
   become: yes
   gather_facts: yes
   any_errors_fatal: true

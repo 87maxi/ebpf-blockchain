@@ -6,7 +6,7 @@
 # =============================================================================
 
 - name: Disaster Recovery
-  hosts: ebpf_nodes
+  hosts: lxc_nodes
   become: true
   gather_facts: true
   any_errors_fatal: true

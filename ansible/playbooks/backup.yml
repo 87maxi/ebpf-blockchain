@@ -5,7 +5,7 @@
 # =============================================================================
 
 - name: eBPF Blockchain Backup
-  hosts: ebpf_nodes
+  hosts: lxc_nodes
   become: yes
   gather_facts: yes
 
