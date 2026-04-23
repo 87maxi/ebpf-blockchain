@@ -1,2 +1,15 @@
 pub mod prometheus;
 pub mod system;
+
+// Re-export new metrics for TAREA 3.5
+pub use prometheus::{
+    KPROBE_HIT_COUNT,
+    HOT_RELOAD_SUCCESS_TOTAL,
+    HOT_RELOAD_FAILURE_TOTAL,
+    SWARM_DIAL_ERRORS_TOTAL,
+    ROCKSDB_WRITE_RATE_BYTES_TOTAL,
+    ROCKSDB_DB_SIZE_BYTES,
+    API_REQUEST_DURATION,
+    API_REQUESTS_TOTAL,
+    RINGBUF_BUFFER_UTILIZATION,
+};
