@@ -31,7 +31,7 @@
       "id": 101,
       "options": { "colorMode": "background", "graphMode": "none", "textMode": "name" },
       "targets": [
-        { "expr": "up{job='ebpf-nodes'}", "legendFormat": "{{instance}}", "refId": "A" }
+        { "expr": "up{job=~\"ebpf-node-.*\"}", "legendFormat": "{{instance}}", "refId": "A" }
       ],
       "title": "Nodes Online",
       "type": "stat",
@@ -119,7 +119,7 @@
         "showHeader": true
       },
       "targets": [
-        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"rpc_tx_received\" | line_format \"{{.tx_id}} | {{.data}}\"", "format": "table", "refId": "A" }
+        { "expr": "{job=~\"ebpf-node-.*\"} | json | event=\"rpc_tx_received\" | line_format \"{{.tx_id}} | {{.data}}\"", "format": "table", "refId": "A" }
       ],
       "title": "Mempool Ingest (RPC)",
       "type": "table"
@@ -132,7 +132,7 @@
         "showHeader": true
       },
       "targets": [
-        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"gossip_tx_proposal\" | line_format \"{{.tx_id}} | from {{.sender}}\"", "format": "table", "refId": "A" }
+        { "expr": "{job=~\"ebpf-node-.*\"} | json | event=\"gossip_tx_proposal\" | line_format \"{{.tx_id}} | from {{.sender}}\"", "format": "table", "refId": "A" }
       ],
       "title": "Propagation Stream (Gossip)",
       "type": "table"
@@ -145,7 +145,7 @@
         "showHeader": true
       },
       "targets": [
-        { "expr": "{job=\"ebpf-nodes\"} | json | event=\"gossip_vote_received\" | line_format \"{{.tx_id}} | Voted by {{.voter}}\"", "format": "table", "refId": "A" }
+        { "expr": "{job=~\"ebpf-node-.*\"} | json | event=\"gossip_vote_received\" | line_format \"{{.tx_id}} | Voted by {{.voter}}\"", "format": "table", "refId": "A" }
       ],
       "title": "Consensus Approvals (Votes)",
       "type": "table"
@@ -193,7 +193,7 @@
         "wrapLogMessage": true
       },
       "targets": [
-        { "expr": "{job=\"ebpf-nodes\"}", "refId": "A" }
+        { "expr": "{job=~\"ebpf-node-.*\"}", "refId": "A" }
       ],
       "title": "Node Event Stream (JSON Debug)",
       "type": "logs"
@@ -208,13 +208,13 @@
       {
         "current": { "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(up{job='ebpf-nodes'}, instance)",
+        "definition": "label_values(up{job=~\"ebpf-node-.*\"}, instance)",
         "hide": 0,
         "includeAll": true,
         "label": "Node",
         "multi": true,
         "name": "node",
-        "query": { "query": "label_values(up{job='ebpf-nodes'}, instance)", "refId": "PrometheusVariableQuery" },
+        "query": { "query": "label_values(up{job=~\"ebpf-node-.*\"}, instance)", "refId": "PrometheusVariableQuery" },
         "refresh": 1,
         "type": "query"
       }

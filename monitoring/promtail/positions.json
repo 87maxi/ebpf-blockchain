@@ -1,0 +1,14 @@
+{
+    "ebpf-node-1": {
+        "offset": 0,
+        "inode": 0
+    },
+    "ebpf-node-2": {
+        "offset": 0,
+        "inode": 0
+    },
+    "ebpf-node-3": {
+        "offset": 0,
+        "inode": 0
+    }
+}
