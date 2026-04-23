@@ -33,7 +33,10 @@
       "type": "row"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -79,14 +82,21 @@
         {
           "expr": "ebpf_node_transactions_processed_total",
           "legendFormat": "Processed",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Transacciones Procesadas",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -132,14 +142,21 @@
         {
           "expr": "transactions_confirmed_total",
           "legendFormat": "Confirmed",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Transacciones Confirmadas",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -185,14 +202,21 @@
         {
           "expr": "transactions_rejected_total",
           "legendFormat": "Rejected",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Transacciones Rechazadas",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -238,14 +262,21 @@
         {
           "expr": "ebpf_node_transactions_failures_total",
           "legendFormat": "Failures",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Fallos de Procesamiento",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -291,14 +322,21 @@
         {
           "expr": "ebpf_node_transaction_queue_size",
           "legendFormat": "Queue",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Cola de Transacciones",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -344,7 +382,11 @@
         {
           "expr": "ebpf_node_blocks_proposed_total",
           "legendFormat": "Blocks",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Bloques Propuestos",
@@ -367,7 +409,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -411,7 +456,11 @@
         {
           "expr": "rate(ebpf_node_transactions_processed_total[5m])",
           "legendFormat": "TPS (Procesadas)",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -424,7 +473,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -460,7 +509,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -504,30 +556,42 @@
         {
           "expr": "rate(transactions_confirmed_total[5m])",
           "legendFormat": "Confirmadas",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "rate(transactions_rejected_total[5m])",
           "legendFormat": "Rechazadas",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "rate(ebpf_node_transactions_failures_total[5m])",
           "legendFormat": "Fallos",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Tasa de Confirmación vs Rechazo",
+      "title": "Tasa de Confirmaci\u00f3n vs Rechazo",
       "tooltip": {
         "shared": true,
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -575,7 +639,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -619,7 +686,11 @@
         {
           "expr": "rate(ebpf_node_transactions_by_type_total[5m])",
           "legendFormat": "{{type}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -632,7 +703,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -668,7 +739,10 @@
       "bars": true,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -712,7 +786,11 @@
         {
           "expr": "ebpf_node_transactions_by_type_total",
           "legendFormat": "{{type}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -725,7 +803,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -773,7 +851,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -816,8 +897,12 @@
       "targets": [
         {
           "expr": "ebpf_node_transaction_queue_size",
-          "legendFormat": "Tamaño de Cola",
-          "refId": "A"
+          "legendFormat": "Tama\u00f1o de Cola",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [
@@ -837,13 +922,13 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Tamaño de Cola de Transacciones",
+      "title": "Tama\u00f1o de Cola de Transacciones",
       "tooltip": {
         "shared": true,
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -879,7 +964,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -923,7 +1011,11 @@
         {
           "expr": "ebpf_node_transactions_failures_total",
           "legendFormat": "Fallos Acumulados",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [
@@ -949,7 +1041,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",

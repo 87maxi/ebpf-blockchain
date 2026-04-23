@@ -38,7 +38,11 @@
         {
           "expr": "ebpf_node_uptime_seconds",
           "legendFormat": "uptime",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -61,6 +65,10 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -77,7 +85,11 @@
         {
           "expr": "ebpf_node_peers_connected{status=\"connected\"}",
           "legendFormat": "peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -99,6 +111,10 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -115,7 +131,11 @@
         {
           "expr": "ebpf_node_transactions_confirmed_total",
           "legendFormat": "confirmed",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -130,6 +150,10 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -146,7 +170,11 @@
         {
           "expr": "ebpf_node_blocks_proposed_total",
           "legendFormat": "blocks",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -161,11 +189,15 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "id": 6,
-      "title": "Red P2P - Tráfico de Mensajes",
+      "title": "Red P2P - Tr\u00e1fico de Mensajes",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -177,12 +209,20 @@
         {
           "expr": "rate(ebpf_node_messages_sent_total[5m])",
           "legendFormat": "Enviados/s",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "rate(ebpf_node_messages_received_total[5m])",
           "legendFormat": "Recibidos/s",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -193,6 +233,10 @@
             "fillOpacity": 10
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -209,9 +253,17 @@
         {
           "expr": "ebpf_node_peers_connected",
           "legendFormat": "{{status}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
-      ]
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
     },
     {
       "id": 8,
@@ -227,18 +279,30 @@
         {
           "expr": "rate(ebpf_node_bandwidth_sent_bytes_total[5m])",
           "legendFormat": "Enviado",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "rate(ebpf_node_bandwidth_received_bytes_total[5m])",
           "legendFormat": "Recibido",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "Bps"
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -254,14 +318,22 @@
       "targets": [
         {
           "expr": "ebpf_node_consensus_duration_ms",
-          "legendFormat": "Duración (ms)",
-          "refId": "A"
+          "legendFormat": "Duraci\u00f3n (ms)",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ms"
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -278,13 +350,21 @@
         {
           "expr": "rate(ebpf_node_transactions_processed_total[5m])",
           "legendFormat": "TPS",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ops"
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -312,7 +392,11 @@
         {
           "expr": "ebpf_node_sybil_attempts_total",
           "legendFormat": "sybil",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -334,6 +418,10 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -350,7 +438,11 @@
         {
           "expr": "ebpf_node_transactions_replay_rejected_total",
           "legendFormat": "replay",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -372,6 +464,10 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -388,7 +484,11 @@
         {
           "expr": "ebpf_node_xdp_packets_dropped_total",
           "legendFormat": "dropped",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "fieldConfig": {
@@ -410,11 +510,15 @@
             ]
           }
         }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "id": 15,
-      "title": "Tamaño Whitelist/Blacklist",
+      "title": "Tama\u00f1o Whitelist/Blacklist",
       "type": "stat",
       "gridPos": {
         "h": 4,
@@ -426,14 +530,26 @@
         {
           "expr": "ebpf_node_xdp_whitelist_size",
           "legendFormat": "whitelist",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "ebpf_node_xdp_blacklist_size",
           "legendFormat": "blacklist",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
-      ]
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
     }
   ],
   "time": {

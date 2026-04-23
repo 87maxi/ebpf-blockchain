@@ -33,7 +33,10 @@
       "type": "row"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -79,14 +82,21 @@
         {
           "expr": "ebpf_node_blocks_proposed_total",
           "legendFormat": "Blocks",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Bloques Propuestos",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -132,14 +142,21 @@
         {
           "expr": "ebpf_node_consensus_rounds_total",
           "legendFormat": "Rounds",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Rondas de Consenso",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -193,14 +210,21 @@
         {
           "expr": "ebpf_node_consensus_duration_ms",
           "legendFormat": "Duration",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
-      "title": "Duración Consenso",
+      "title": "Duraci\u00f3n Consenso",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -246,14 +270,21 @@
         {
           "expr": "ebpf_node_validator_count",
           "legendFormat": "Validators",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Validadores Activos",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -299,14 +330,21 @@
         {
           "expr": "ebpf_node_slashing_events_total",
           "legendFormat": "Slashing",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Eventos de Slashing",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -352,7 +390,11 @@
         {
           "expr": "ebpf_node_transactions_processed_total",
           "legendFormat": "Processed",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Transacciones Procesadas",
@@ -375,7 +417,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms"
@@ -418,8 +463,12 @@
       "targets": [
         {
           "expr": "ebpf_node_consensus_duration_ms",
-          "legendFormat": "Duración (ms)",
-          "refId": "A"
+          "legendFormat": "Duraci\u00f3n (ms)",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [
@@ -439,13 +488,13 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Duración de Rondas de Consenso",
+      "title": "Duraci\u00f3n de Rondas de Consenso",
       "tooltip": {
         "shared": true,
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -481,7 +530,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -525,7 +577,11 @@
         {
           "expr": "rate(ebpf_node_consensus_rounds_total[5m])",
           "legendFormat": "Rondas por segundo",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -538,7 +594,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -586,7 +642,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -630,7 +689,11 @@
         {
           "expr": "rate(ebpf_node_blocks_proposed_total[5m])",
           "legendFormat": "Bloques por segundo",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -643,7 +706,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -679,7 +742,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -723,7 +789,11 @@
         {
           "expr": "rate(ebpf_node_transactions_processed_total[5m])",
           "legendFormat": "TPS",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -736,7 +806,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -784,7 +854,10 @@
       "bars": true,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -828,7 +901,11 @@
         {
           "expr": "ebpf_node_slashing_events_total",
           "legendFormat": "Eventos de Slashing",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -841,7 +918,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -877,7 +954,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -921,7 +1001,11 @@
         {
           "expr": "ebpf_node_validator_count",
           "legendFormat": "Validadores Activos",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [
@@ -947,7 +1031,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -983,7 +1067,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -1026,8 +1113,12 @@
       "targets": [
         {
           "expr": "ebpf_node_transactions_failures_total",
-          "legendFormat": "Fallos de Transacción",
-          "refId": "A"
+          "legendFormat": "Fallos de Transacci\u00f3n",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [
@@ -1047,13 +1138,13 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Fallos de Transacción Acumulados",
+      "title": "Fallos de Transacci\u00f3n Acumulados",
       "tooltip": {
         "shared": true,
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",

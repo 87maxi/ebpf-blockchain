@@ -33,7 +33,10 @@
       "type": "row"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -79,14 +82,21 @@
         {
           "expr": "ebpf_node_peers_connected",
           "legendFormat": "{{status}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Peers Conectados",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -140,14 +150,21 @@
         {
           "expr": "ebpf_node_messages_sent_total",
           "legendFormat": "Total",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Mensajes Enviados",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -193,14 +210,21 @@
         {
           "expr": "ebpf_node_messages_received_total",
           "legendFormat": "Total",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Mensajes Recibidos",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -246,14 +270,21 @@
         {
           "expr": "rate(ebpf_node_bandwidth_sent_bytes_total[5m])",
           "legendFormat": "Sent",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Bandwidth Enviado (rate)",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -299,14 +330,21 @@
         {
           "expr": "rate(ebpf_node_bandwidth_received_bytes_total[5m])",
           "legendFormat": "Received",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Bandwidth Recibido (rate)",
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -352,7 +390,11 @@
         {
           "expr": "ebpf_node_network_latency_ms",
           "legendFormat": "{{peer_id}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Latencia de Red",
@@ -367,7 +409,7 @@
         "y": 5
       },
       "id": 18,
-      "title": "Tráfico de Mensajes",
+      "title": "Tr\u00e1fico de Mensajes",
       "type": "row"
     },
     {
@@ -375,7 +417,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -419,12 +464,20 @@
         {
           "expr": "rate(ebpf_node_messages_sent_total[5m])",
           "legendFormat": "Sent Rate",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "rate(ebpf_node_messages_received_total[5m])",
           "legendFormat": "Received Rate",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -437,7 +490,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -473,7 +526,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -517,7 +573,11 @@
         {
           "expr": "rate(ebpf_node_messages_sent_by_type_total[5m])",
           "legendFormat": "{{type}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -530,7 +590,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -578,7 +638,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "Bps"
@@ -622,7 +685,11 @@
         {
           "expr": "rate(ebpf_node_bandwidth_sent_bytes_total[5m])",
           "legendFormat": "Sent",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -635,7 +702,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -671,7 +738,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "Bps"
@@ -715,7 +785,11 @@
         {
           "expr": "rate(ebpf_node_bandwidth_received_bytes_total[5m])",
           "legendFormat": "Received",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -728,7 +802,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -776,7 +850,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -820,7 +897,11 @@
         {
           "expr": "ebpf_node_peers_connected",
           "legendFormat": "{{status}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -833,7 +914,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
@@ -869,7 +950,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -913,12 +997,20 @@
         {
           "expr": "ebpf_node_p2p_connections_total",
           "legendFormat": "Total Connections",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "expr": "ebpf_node_p2p_connections_closed",
           "legendFormat": "Closed Connections",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -931,7 +1023,7 @@
         "sort": 0,
         "value_type": "individual"
       },
-      "type": "time-series",
+      "type": "timeseries",
       "xaxis": {
         "buckets": null,
         "mode": "time",
