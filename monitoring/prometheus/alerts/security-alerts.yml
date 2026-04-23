@@ -1,0 +1,216 @@
+groups:
+  - name: security_alerts
+    rules:
+      # Security Threat Alerts
+      - alert: HighThreatScore
+        expr: ebpf_node_security_threat_score > 70
+        for: 5m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "High security threat score on {{ $labels.node }}"
+          description: "Threat score is {{ $value }} on node {{ $labels.node }}. Immediate investigation required."
+          action: "Check logs: journalctl -u ebpf-blockchain -f"
+
+      - alert: SlashingEventDetected
+        expr: ebpf_node_slashing_events_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Slashing event detected on {{ $labels.node }}"
+          description: "Validator misbehavior detected. Slashing events: {{ $value }}"
+          action: "Review slashing events in security-threat dashboard"
+
+      - alert: DoubleVoteAttempt
+        expr: ebpf_node_double_vote_attempts_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: consensus
+        annotations:
+          summary: "Double vote attempt detected on {{ $labels.node }}"
+          description: "Node attempted to vote twice for same block. Events: {{ $value }}"
+          action: "Check consensus-integrity dashboard and blacklist validator"
+
+      - alert: ActiveSybilAttack
+        expr: ebpf_node_sybil_attempts_total > 5
+        for: 2m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Possible Sybil attack on {{ $labels.node }}"
+          description: "Multiple Sybil attack attempts detected: {{ $value }}"
+          action: "Review peer scores in network-attack-surface dashboard"
+
+      - alert: BlacklistGrowingFast
+        expr: increase(ebpf_node_blacklist_size[15m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Rapid blacklist growth on {{ $labels.node }}"
+          description: "Blacklist grew by {{ $value }} in last 15 minutes"
+          action: "Check for coordinated attack"
+
+      # Consensus Integrity Alerts
+      - alert: ForkDetected
+        expr: ebpf_node_fork_events_total > 0
+        for: 0m
+        labels:
+          severity: warning
+          category: consensus
+        annotations:
+          summary: "Blockchain fork detected on {{ $labels.node }}"
+          description: "Fork events: {{ $value }}. Check consensus integrity."
+          action: "Review fork events in consensus-integrity dashboard"
+
+      - alert: FinalityDelay
+        expr: increase(ebpf_node_finality_checkpoints_total[30m]) < 1
+        for: 15m
+        labels:
+          severity: warning
+          category: consensus
+        annotations:
+          summary: "Finality checkpoint delay on {{ $labels.node }}"
+          description: "No finality checkpoints in last 30 minutes"
+          action: "Check validator participation and quorum"
+
+      - alert: ValidatorDown
+        expr: ebpf_node_validator_uptime_ratio < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          category: consensus
+        annotations:
+          summary: "Validator {{ $labels.validator_id }} uptime below 50%"
+          description: "Validator uptime: {{ $value }}. May affect consensus."
+          action: "Check validator node health"
+
+      - alert: HighConsensusLatency
+        expr: histogram_quantile(0.95, ebpf_node_consensus_latency_ms_bucket) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          category: consensus
+        annotations:
+          summary: "High consensus latency on {{ $labels.node }}"
+          description: "p95 latency: {{ $value }}ms. Threshold: 1000ms"
+          action: "Check network connectivity and peer count"
+
+      # Network Attack Alerts
+      - alert: EclipseAttackSuspected
+        expr: ebpf_node_suspicious_connections_total{reason="eclipse"} > 10
+        for: 3m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "Eclipse attack suspected on {{ $labels.node }}"
+          description: "Eclipse-type suspicious connections: {{ $value }}"
+          action: "Isolate node and review peer connections"
+
+      - alert: DDoSAttackDetected
+        expr: ebpf_node_suspicious_connections_total{reason="ddos"} > 50
+        for: 1m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "DDoS attack detected on {{ $labels.node }}"
+          description: "DDoS-type suspicious connections: {{ $value }}"
+          action: "Enable rate limiting and notify operators"
+
+      - alert: BandwidthAbuse
+        expr: increase(ebpf_node_bandwidth_abuse_total[10m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "Bandwidth abuse detected on {{ $labels.node }}"
+          description: "Bandwidth abuse events: {{ $value }} in 10 minutes"
+          action: "Review peer scores and consider blacklisting"
+
+      - alert: MessageValidationFailuresHigh
+        expr: increase(ebpf_node_message_validation_failures_total[5m]) > 20
+        for: 3m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High message validation failure rate on {{ $labels.node }}"
+          description: "Validation failures: {{ $value }} in 5 minutes"
+          action: "Check for malformed messages or protocol mismatch"
+
+      # eBPF Security Alerts
+      - alert: CriticalXDPRate
+        expr: rate(ebpf_node_xdp_drops_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: critical
+          category: ebpf
+        annotations:
+          summary: "Critical XDP drop rate on {{ $labels.node }}"
+          description: "XDP drop rate: {{ $value }}/sec. Threshold: 100/sec"
+          action: "Check for packet flood or malicious traffic"
+
+      - alert: KprobeHitAnomaly
+        expr: rate(ebpf_node_kprobe_hits_total[5m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          category: ebpf
+        annotations:
+          summary: "Kprobe hit anomaly on {{ $labels.node }}"
+          description: "Kprobe hit rate: {{ $value }}/sec. Threshold: 1000/sec"
+          action: "Review kprobe targets and check for exploitation"
+
+      - alert: HotReloadFailures
+        expr: increase(ebpf_node_hot_reload_failure_total[10m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          category: ebpf
+        annotations:
+          summary: "Hot reload failures on {{ $labels.node }}"
+          description: "Hot reload failures: {{ $value }} in 10 minutes"
+          action: "Check eBPF program compatibility and system resources"
+
+      - alert: ResourceExhaustion
+        expr: ebpf_node_db_size_bytes / 1073741824 > 8
+        for: 5m
+        labels:
+          severity: warning
+          category: ebpf
+        annotations:
+          summary: "Database size approaching limit on {{ $labels.node }}"
+          description: "DB size: {{ $value }}GB. Threshold: 8GB"
+          action: "Trigger cleanup or expand storage"
+
+      # Automated Response Alerts
+      - alert: AutoBlacklistTrigger
+        expr: ebpf_node_security_threat_score > 85
+        for: 2m
+        labels:
+          severity: critical
+          category: automated-response
+        annotations:
+          summary: "Auto-blacklist triggered on {{ $labels.node }}"
+          description: "Threat score {{ $value }} exceeded 85. Auto-blacklist activated."
+          action: "Review and confirm blacklist. Check for false positives."
+
+      - alert: EmergencyConsensusHalt
+        expr: ebpf_node_double_vote_attempts_total > 5 or ebpf_node_fork_events_total > 10
+        for: 0m
+        labels:
+          severity: critical
+          category: automated-response
+        annotations:
+          summary: "Emergency consensus halt recommended on {{ $labels.node }}"
+          description: "Critical security events detected. Consider halting consensus."
+          action: "MANUAL ACTION REQUIRED: Halt consensus and investigate"

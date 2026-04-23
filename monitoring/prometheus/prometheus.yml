@@ -11,6 +11,8 @@ global:
 # Alertas configuradas
 rule_files:
   - 'alerts.yml'
+  - 'security-alerts.yml'
+  - 'alertmanager.yml'
 
 # Alertmanager configuration
 alerting:
@@ -71,3 +73,12 @@ scrape_configs:
           - 'localhost:3000'
         labels:
           group: 'monitoring'
+
+  # Block Generator metrics
+  - job_name: 'ebpf-block-generator'
+    static_configs:
+      - targets:
+          - 'localhost:9101'
+        labels:
+          group: 'ebpf-cluster'
+          service: 'block-generator'

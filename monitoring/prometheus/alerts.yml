@@ -134,7 +134,7 @@ groups:
       # ALERTAS DE SEGURIDAD
       # =====================
       - alert: SybilAttackDetected
-        expr: ebpf_node_sybil_attempts_detected_total > 0
+        expr: ebpf_node_sybil_attempts_total > 0
         for: 1m
         labels:
           severity: critical
@@ -177,7 +177,7 @@ groups:
           description: "Uso de memoria: {{ $value }} bytes (umbral: 1GB). Posible fuga de memoria."
 
       - alert: NodeDown
-        expr: up{job="ebpf-node"} == 0
+        expr: up{job=~"ebpf-node-.*"} == 0
         for: 1m
         labels:
           severity: critical
