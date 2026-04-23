@@ -4,13 +4,21 @@
 
 set -euo pipefail
 
-# Configuration
+# =============================================================================
+# TAREA 4.1: Directory variables with environment override support
+# =============================================================================
 NODE_COUNT=${1:-3}
 BOOTSTRAP_PEER=${2:-""}
-WORK_DIR="/root/ebpf-blockchain"
-DATA_DIR="/var/lib/ebpf-blockchain"
-LOG_DIR="/var/log/ebpf-blockchain"
-INSTALL_DIR="${WORK_DIR}/ebpf-node/target/release"
+NODE_WORKING_DIR="${NODE_WORKING_DIR:-/root/ebpf-blockchain}"
+NODE_DATA_DIR="${NODE_DATA_DIR:-/var/lib/ebpf-blockchain}"
+NODE_LOG_DIR="${NODE_LOG_DIR:-/var/log/ebpf-blockchain}"
+NODE_BINARY_DIR="${NODE_WORKING_DIR}/ebpf-node/target/release"
+
+# Legacy aliases for backward compatibility
+WORK_DIR="${NODE_WORKING_DIR}"
+DATA_DIR="${NODE_DATA_DIR}"
+LOG_DIR="${NODE_LOG_DIR}"
+INSTALL_DIR="${NODE_BINARY_DIR}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -86,7 +94,7 @@ install_service() {
     
     local service_file="/etc/systemd/system/ebpf-blockchain.service"
     
-    cat > "${service_file}" << 'EOF'
+    cat > "${service_file}" << EOF
 [Unit]
 Description=eBPF Blockchain Node
 After=network-online.target
@@ -95,8 +103,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/ebpf-blockchain
-ExecStart=/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node --iface eth0
+WorkingDirectory=${NODE_WORKING_DIR}
+ExecStart=${NODE_BINARY_DIR}/ebpf-node --iface eth0
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -118,7 +126,7 @@ LimitMEMLOCK=Infinity
 
 # Environment
 Environment=RUST_LOG=info
-Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=${NODE_WORKING_DIR}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
