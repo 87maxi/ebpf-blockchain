@@ -106,6 +106,7 @@ services:
       - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/log:/var/log:ro
+      - /var/log/journal:/var/log/journal:ro
       - promtail-data:/tmp/promtail
     command:
       - '-config.file=/etc/promtail/promtail-config.yml'

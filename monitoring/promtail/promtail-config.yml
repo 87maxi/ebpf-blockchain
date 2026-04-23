@@ -10,13 +10,49 @@ clients:
 
 # Scrape configurations
 scrape_configs:
-  # eBPF Node application logs
-  - job_name: ebpf-node-logs
+  # eBPF Node application logs - journald (systemd service)
+  - job_name: ebpf-nodes
+    journal:
+      path: /var/log/journal
+      max_age: 12h
+      labels:
+        cluster: ebpf-blockchain-lab
+    pipeline_stages:
+      # Filter only ebpf-blockchain service logs
+      - match:
+          expression: '{_SYSTEMD_UNIT="ebpf-blockchain.service"}'
+      # Parse JSON structured logs from eBPF nodes
+      - json:
+          expressions:
+            level: level
+            message: message
+            target: target
+            thread_id: thread_id
+            thread_name: thread_name
+            file: file
+            line: line
+            timestamp: timestamp
+      # Extract custom event fields from structured logs
+      - regex:
+          expressions:
+            event: "event=(?P<event>[a-z_]+)"
+      # Set proper timestamp from log (use stream time as fallback)
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      # Label by level for easy filtering
+      - labels:
+          level:
+          event:
+          component: _COMM
+
+  # eBPF Node application logs - file fallback (legacy)
+  - job_name: ebpf-node-logs-file
     static_configs:
       - targets:
           - localhost
         labels:
-          job: ebpf-node-logs
+          job: ebpf-node-logs-file
           __path__: /var/log/ebpf-node/*.log
           cluster: ebpf-blockchain-lab
     pipeline_stages:
