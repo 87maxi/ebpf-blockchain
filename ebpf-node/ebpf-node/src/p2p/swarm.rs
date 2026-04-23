@@ -3,6 +3,7 @@ use std::time::Duration;
 use libp2p::{
     gossipsub,
     identify,
+    kad,
     mdns,
     noise,
     request_response,
@@ -11,12 +12,18 @@ use libp2p::{
     tcp,
     yamux,
     Multiaddr,
+    PeerId,
 };
 
 use crate::config::node::{SyncRequest, SyncResponse};
 use crate::p2p::behaviour::MyBehaviour;
 
-/// Create a gossipsub behaviour with the given keypair
+/// GossipSub topic with namespace for versioning and network isolation.
+/// Format: /<application>/<protocol>/<version>
+/// This prevents cross-network message confusion and enables protocol versioning.
+pub const GOSSIPSUB_TOPIC: &str = "/ebpf-blockchain/consensus/1.0.0";
+
+/// Create gossipsub behaviour with the given keypair
 pub fn create_gossipsub(
     keypair: libp2p::identity::Keypair,
 ) -> anyhow::Result<gossipsub::Behaviour> {
@@ -42,10 +49,14 @@ pub fn create_gossipsub(
 }
 
 /// Create the P2P swarm with all behaviours
+/// TAREA 2.5: Includes Kademlia DHT configuration
+/// CHANGE 6: Enhanced Kademlia configuration for server mode
 pub fn create_swarm(
     keypair: libp2p::identity::Keypair,
     gossipsub: gossipsub::Behaviour,
 ) -> anyhow::Result<Swarm<MyBehaviour>> {
+    let peer_id = keypair.public().to_peer_id();
+    
     let identify = identify::Behaviour::new(identify::Config::new(
         "/ebpf-blockchain/1.0.0".into(),
         keypair.public(),
@@ -53,13 +64,27 @@ pub fn create_swarm(
 
     let mdns = mdns::tokio::Behaviour::new(
         mdns::Config::default(),
-        keypair.public().to_peer_id(),
+        peer_id,
     )?;
 
     let sync = request_response::cbor::Behaviour::new(
         [(libp2p::StreamProtocol::new(SyncRequest::protocol()), request_response::ProtocolSupport::Full)],
         request_response::Config::default(),
     );
+    
+    // TAREA 2.5: Configure Kademlia DHT
+    let kad_store = kad::store::MemoryStore::new(peer_id);
+    let protocol_id = libp2p::StreamProtocol::new("/ebpf-blockchain/kad/1.0.0");
+    
+    // CHANGE 6: Configure Kademlia with proper parameters for server mode
+    let kad_config = {
+        let mut config = kad::Config::new(protocol_id);
+        config.set_publication_interval(Some(Duration::from_secs(60)));
+        config.set_provider_publication_interval(Some(Duration::from_secs(3600)));
+        config
+    };
+    
+    let kademlia = kad::Behaviour::with_config(peer_id, kad_store, kad_config);
 
     let swarm = SwarmBuilder::with_existing_identity(keypair.clone().into())
         .with_tokio()
@@ -73,6 +98,7 @@ pub fn create_swarm(
             Ok(MyBehaviour {
                 gossipsub,
                 identify,
+                kademlia,
                 sync,
                 mdns,
             })
@@ -93,8 +119,8 @@ pub fn setup_listening_and_subscription(
         swarm.listen_on(addr.clone())?;
     }
 
-    // Subscribe to Gossip topic
-    let topic = gossipsub::IdentTopic::new("gossip");
+    // Subscribe to Gossip topic using namespaced topic
+    let topic = gossipsub::IdentTopic::new(GOSSIPSUB_TOPIC);
     let _ = swarm.behaviour_mut().gossipsub.subscribe(&topic);
 
     Ok(topic)

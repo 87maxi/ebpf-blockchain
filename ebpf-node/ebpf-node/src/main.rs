@@ -6,7 +6,7 @@ mod p2p;
 mod security;
 mod metrics;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use config::cli::{Opt, load_saved_peers, save_peers, get_bootstrap_peers_from_env, get_ip_from_multiaddr};
@@ -17,7 +17,7 @@ use db::backup::schedule_backups;
 use ebpf::loader::{load_binary, load};
 use ebpf::programs::attach_all;
 use ebpf::hot_reload::EbpfHotReloadManager;
-use metrics::prometheus::{initialize_metrics, PEERS_CONNECTED, PEERS_IDENTIFIED, PEERS_SAVED, BLOCKS_PROPOSED};
+use metrics::prometheus::{initialize_metrics, PEERS_CONNECTED, PEERS_IDENTIFIED, PEERS_SAVED, BLOCKS_PROPOSED, KPROBE_HIT_COUNT, HOT_RELOAD_SUCCESS_TOTAL, HOT_RELOAD_FAILURE_TOTAL, SWARM_DIAL_ERRORS_TOTAL, ROCKSDB_WRITE_RATE_BYTES_TOTAL, ROCKSDB_DB_SIZE_BYTES, API_REQUEST_DURATION, API_REQUESTS_TOTAL, RINGBUF_BUFFER_UTILIZATION};
 use p2p::behaviour::MyBehaviour;
 use p2p::swarm::{create_swarm, create_gossipsub, setup_listening_and_subscription};
 use security::peer_store::PeerStore;
@@ -132,12 +132,95 @@ async fn main() -> anyhow::Result<()> {
     info!("Local Peer ID: {}", swarm.local_peer_id());
     let _ = std::fs::write("/tmp/peer_id.txt", swarm.local_peer_id().to_string());
     
+    // =============================================================================
+    // CHANGE 5: Initialize Genesis Block if database is empty
+    // =============================================================================
+    // Moved after swarm creation to have access to local_peer_id for genesis proposer
+    {
+        let local_peer_id_for_genesis = swarm.local_peer_id().to_string();
+        let latest_height: Option<u64> = db.get(b"latest_height".as_ref())
+            .ok().flatten()
+            .and_then(|v| bincode::deserialize(&v).ok());
+            
+        if latest_height.is_none() || latest_height.unwrap() == 0 {
+            info!("Initializing genesis block...");
+            let genesis_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            let genesis_block = crate::config::node::Block {
+                height: 0,
+                hash: String::new(), // Will be computed
+                parent_hash: "0x0".to_string(),
+                proposer: local_peer_id_for_genesis.clone(),
+                timestamp: genesis_timestamp,
+                transactions: Vec::new(),
+                quorum_votes: 0,
+                total_validators: 0,
+            };
+            
+            // Compute hash for genesis block
+            let genesis_hash = genesis_block.compute_hash();
+            let genesis_block = crate::config::node::Block {
+                hash: genesis_hash.clone(),
+                ..genesis_block
+            };
+            
+            let genesis_key = format!("block:0");
+            db.put(genesis_key.as_bytes(), bincode::serialize(&genesis_block).unwrap()).unwrap();
+            db.put(b"latest_height".as_ref(), bincode::serialize(&0u64).unwrap()).unwrap();
+            info!("Genesis block initialized: hash={}", genesis_hash);
+        }
+    }
+    
+    // =============================================================================
+    // TAREA 4.7: Initialize whitelist with local peer_id as trusted peer
+    // =============================================================================
+    {
+        let local_peer_id_str = swarm.local_peer_id().to_string();
+        if let Ok(peer_id) = local_peer_id_str.parse::<libp2p::identity::PeerId>() {
+            if sybil_protection.get_whitelisted_peer_count() == 0 {
+                match sybil_protection.add_to_whitelist(peer_id) {
+                    Ok(_) => {
+                        info!("Local peer added to whitelist: {}", peer_id);
+                    }
+                    Err(e) => {
+                        warn!("Failed to add local peer to whitelist: {}", e);
+                    }
+                }
+            }
+        }
+    }
+    
     // Load bootstrap peers
     let mut bootstrap_peers = opt.bootstrap_peers.clone();
     let env_peers = get_bootstrap_peers_from_env();
     for peer in &env_peers {
         if !bootstrap_peers.contains(peer) {
             bootstrap_peers.push(peer.clone());
+        }
+    }
+    
+    // =============================================================================
+    // CHANGE 7: Populate Whitelist with Bootstrap Peer IDs
+    // =============================================================================
+    let bootstrap_peer_ids: Vec<String> = bootstrap_peers.iter()
+        .filter_map(|addr| {
+            for protocol in addr.iter() {
+                if let libp2p::multiaddr::Protocol::P2p(peer_id) = protocol {
+                    return Some(peer_id.to_string());
+                }
+            }
+            None
+        })
+        .collect();
+    
+    if !bootstrap_peer_ids.is_empty() {
+        if let Err(e) = sybil_protection.init_whitelist(bootstrap_peer_ids.clone()) {
+            warn!("Failed to initialize whitelist: {}", e);
+        } else {
+            info!("Whitelist initialized with {} bootstrap peers", bootstrap_peer_ids.len());
         }
     }
     
@@ -149,6 +232,23 @@ async fn main() -> anyhow::Result<()> {
     for (peer_id, addr) in &saved_peers {
         info!("Trying to reconnect to saved peer {} at {}", peer_id, addr);
     }
+    
+    // =============================================================================
+    // CHANGE 6: Kademlia Bootstrap - Populate Routing Table with Bootstrap Peers
+    // =============================================================================
+    // Add bootstrap peers to Kademlia routing table before dialing
+    for addr in &bootstrap_peers {
+        if let Some(peer_id) = addr.iter().find_map(|p| {
+            if let libp2p::multiaddr::Protocol::P2p(id) = p {
+                Some(id)
+            } else {
+                None
+            }
+        }) {
+            swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+        }
+    }
+    info!("Kademlia routing table populated with {} bootstrap peers", bootstrap_peers.len());
     
     // Bootstrap with retry logic
     let connection_retries = opt.connection_retries;
@@ -190,15 +290,31 @@ async fn main() -> anyhow::Result<()> {
     
     // Setup ports from environment
     let metrics_port = config::node::get_port_from_env("METRICS_PORT", 9090);
-    let rpc_port = config::node::get_port_from_env("RPC_PORT", 9091);
+    let rpc_port = config::node::get_port_from_env("RPC_PORT", 8080);
     let ws_port = config::node::get_port_from_env("WS_PORT", 9092);
-    let network_p2p_port = config::node::get_port_from_env("NETWORK_P2P_PORT", 9000);
+    let network_p2p_port = config::node::get_port_from_env("NETWORK_P2P_PORT", 50000);
     
     info!("Port configuration - Metrics: {}, RPC: {}, WS: {}, P2P: {}",
         metrics_port, rpc_port, ws_port, network_p2p_port);
     
     // Create NodeState
     let local_peer_id = swarm.local_peer_id().to_string();
+    let public_key_bytes = keypair.public().to_bytes();
+    let public_key = hex::encode(public_key_bytes);
+    
+    // =============================================================================
+    // TAREA 4: Create Ed25519 signing/verification keys for real vote signatures
+    // =============================================================================
+    // Convert libp2p keypair to ed25519_dalek signing key
+    // libp2p ed25519 keypair is 64 bytes (32 private + 32 public), we need only the first 32
+    let keypair_bytes = keypair.to_bytes();
+    let mut private_key_bytes = [0u8; 32];
+    private_key_bytes.copy_from_slice(&keypair_bytes[..32]);
+    let signing_key_inner = ed25519_dalek::SigningKey::from_bytes(&private_key_bytes);
+    let verifying_key_inner = ed25519_dalek::VerifyingKey::from(&signing_key_inner);
+    let signing_key = Arc::new(std::sync::Mutex::new(Some(signing_key_inner)));
+    let verifying_key = Arc::new(verifying_key_inner);
+    
     let node_state = NodeState {
         start_time: std::time::Instant::now(),
         db: db.clone(),
@@ -215,10 +331,45 @@ async fn main() -> anyhow::Result<()> {
             ws_port,
         },
         local_peer_id: local_peer_id.clone(),
+        public_key: public_key.clone(),
         blocks_proposed: 0,
         transactions_processed: 0,
         hot_reload_manager: hot_reload_manager.clone(),
+        // TAREA 2.1: Initialize proposer rotation
+        proposer_rotation_index: Arc::new(std::sync::Mutex::new(0u64)),
+        validator_peers: Arc::new(std::sync::Mutex::new(Vec::<String>::new())),
+        // TAREA 4: Ed25519 signing/verification keys
+        signing_key: signing_key.clone(),
+        verifying_key: verifying_key.clone(),
     };
+    
+    // =============================================================================
+    // TAREA 2: Populate validator set from saved peers or bootstrap peers
+    // =============================================================================
+    // Initialize validator set from saved peers
+    if !saved_peers.is_empty() {
+        info!("Using {} saved peers as initial validators", saved_peers.len());
+        for (peer_id, _) in &saved_peers {
+            let peer_id_str = peer_id.to_string();
+            node_state.register_validator(peer_id_str);
+        }
+    }
+    
+    // If no saved peers, use bootstrap peer IDs
+    if node_state.validator_peers.lock().unwrap().is_empty() {
+        info!("Initializing validator set from bootstrap peers");
+        for addr in &bootstrap_peers {
+            for protocol in addr.iter() {
+                if let libp2p::multiaddr::Protocol::P2p(peer_id) = protocol {
+                    node_state.register_validator(peer_id.to_string());
+                }
+            }
+        }
+    }
+    
+    let validator_count = node_state.validator_peers.lock().unwrap().len();
+    info!("Validator set initialized with {} validators", validator_count);
+    
     let node_state_arc = Arc::new(node_state);
     
     // Setup HTTP API
