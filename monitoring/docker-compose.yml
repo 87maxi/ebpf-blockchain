@@ -8,6 +8,13 @@ services:
     restart: unless-stopped
     ports:
       - "9090:9090"
+    # TAREA 4.6: Health check for Prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -34,6 +41,13 @@ services:
     restart: unless-stopped
     ports:
       - "9093:9093"
+    # TAREA 4.6: Health check for Alertmanager
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
@@ -55,6 +69,13 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    # TAREA 4.6: Health check for Grafana
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -85,6 +106,13 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3100"
+    # TAREA 4.6: Health check for Loki
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
@@ -102,6 +130,13 @@ services:
     image: grafana/promtail:2.9.0
     container_name: ebpf-promtail
     restart: unless-stopped
+    # TAREA 4.6: Health check for Promtail
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9080/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
@@ -109,6 +144,27 @@ services:
       - promtail-data:/tmp/promtail
     command:
       - '-config.file=/etc/promtail/promtail-config.yml'
+    depends_on:
+      - loki
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
+
+  # =====================
+  # EBPF LOG FORWARDER - Collect logs from remote nodes via SSH
+  # =====================
+  ebpf-log-forwarder:
+    image: python:3.11-slim
+    container_name: ebpf-log-forwarder
+    restart: unless-stopped
+    volumes:
+      - ./promtail/ebpf-log-forwarder.py:/app/ebpf-log-forwarder.py:ro
+      - ./promtail/positions.json:/app/positions.json:rw
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python /app/ebpf-log-forwarder.py
     depends_on:
       - loki
     networks:
@@ -128,6 +184,13 @@ services:
       - "9097:9097"   # gRPC
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+    # TAREA 4.6: Health check for Tempo
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
       - tempo-data:/tmp/tempo
@@ -147,6 +210,13 @@ services:
     restart: unless-stopped
     ports:
       - "9100:9100"
+    # TAREA 4.6: Health check for Node Exporter
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro

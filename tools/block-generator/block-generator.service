@@ -1,13 +1,23 @@
 [Unit]
-Description=eBPF Blockchain Block Generator Service
+Description=eBPF Blockchain Block Generator Service - Realistic Traffic Simulator
 Documentation=https://github.com/your-org/ebpf-blockchain
-After=network-online.target
+After=network-online.target prometheus.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=maxi
-ExecStart=/home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/venv/bin/python3 /home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/block_generator.py --nodes 192.168.2.210,192.168.2.211,192.168.2.212 --interval 5 --batch-size 3 --sender block-generator
+WorkingDirectory=/home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator
+ExecStart=/home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/venv/bin/python3 \
+    /home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator/block_generator.py \
+    --nodes 192.168.2.210,192.168.2.211,192.168.2.212 \
+    --interval 5 \
+    --batch-size 3 \
+    --sender block-generator \
+    --failure-rate 0.03 \
+    --metrics-port 9101 \
+    --node-id block-gen-01 \
+    --config /home/maxi/.ebpf-blockchain/block-generator.conf
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -16,10 +26,18 @@ SyslogIdentifier=ebpf-block-generator
 
 # Environment
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/maxi/Documentos/source/ebpf-blockchain/tools/block-generator
 
 # Resource limits
 MemoryMax=256M
 CPUQuota=10%
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/maxi/.ebpf-blockchain
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
