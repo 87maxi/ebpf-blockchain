@@ -2,6 +2,9 @@ server:
   http_listen_port: 3100
   grpc_listen_port: 9096
 
+# Disable auth for local lab environment
+auth_enabled: false
+
 common:
   instance_addr: 127.0.0.1
   path_prefix: /loki

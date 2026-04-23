@@ -39,8 +39,7 @@ scrape_configs:
       # Extract custom event fields from message content
       # eBPF nodes log events like: event=p2p_connected, event=gossip_tx_proposal, etc.
       - regex:
-          expressions:
-            event: "event=(?P<event>[a-z_]+)"
+          expression: "event=(?P<event>[a-z_]+)"
       # Set proper timestamp from log (RFC3339Nano format)
       - timestamp:
           source: timestamp
