@@ -8,11 +8,13 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/root/ebpf-blockchain
+ExecStartPre=/bin/mkdir -p /var/log/ebpf-node
+ExecStartPre=/bin/chmod -R 755 /var/log/ebpf-node
 ExecStart=/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node --iface {{ ansible_default_ipv4.interface | default('eth0') }}
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:/var/log/ebpf-node/ebpf-node.log
+StandardError=append:/var/log/ebpf-node/ebpf-node.log
 SyslogIdentifier=ebpf-blockchain
 
 # Security hardening
