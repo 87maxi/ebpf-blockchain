@@ -1,1 +1,15 @@
 data/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info
+
+# Python virtual environments
+venv/
+env/
+.venv/
+.eggs
+*.egg
