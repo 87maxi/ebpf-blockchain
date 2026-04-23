@@ -140,7 +140,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "transactions_confirmed_total",
+          "expr": "ebpf_node_transactions_confirmed_total",
           "legendFormat": "Confirmed",
           "refId": "A",
           "datasource": {
@@ -200,7 +200,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "transactions_rejected_total",
+          "expr": "ebpf_node_transactions_rejected_total",
           "legendFormat": "Rejected",
           "refId": "A",
           "datasource": {
@@ -554,7 +554,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(transactions_confirmed_total[5m])",
+          "expr": "rate(ebpf_node_transactions_confirmed_total[5m])",
           "legendFormat": "Confirmadas",
           "refId": "A",
           "datasource": {
@@ -563,7 +563,7 @@
           }
         },
         {
-          "expr": "rate(transactions_rejected_total[5m])",
+          "expr": "rate(ebpf_node_transactions_rejected_total[5m])",
           "legendFormat": "Rechazadas",
           "refId": "B",
           "datasource": {
