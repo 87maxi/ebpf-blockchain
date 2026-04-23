@@ -28,7 +28,7 @@
     - name: Pre-deployment checks
       block:
         - name: Check disk space
-          command: df -m /var/lib | tail -1 | awk '{print $4}'
+          shell: df -m /var/lib | tail -1 | awk '{print $4}'
           register: disk_free_mb
           changed_when: false
 
@@ -38,7 +38,7 @@
           when: disk_free_mb.stdout | int < min_disk_space_mb
 
         - name: Check available memory
-          command: free -m | awk '/Mem:/ {print $4}'
+          shell: free -m | awk '/Mem:/ {print $4}'
           register: memory_free_mb
           changed_when: false
 
