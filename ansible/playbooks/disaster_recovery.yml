@@ -23,11 +23,13 @@
     recovery_log: "{{ ebpf_log_dir }}/disaster_recovery_{{ recovery_timestamp }}.log"
 
   pre_tasks:
+    # ---- Recovery Initiation ----
     - name: Record recovery initiation
       copy:
         content: "{{ recovery_timestamp }} DISASTER RECOVERY INITIATED - Mode: {{ recovery_mode }}\n"
         dest: "{{ recovery_log }}"
         mode: "0644"
+      tags: [disaster-recovery, logging]
 
     - name: Notify recovery start
       debug:
@@ -37,6 +39,7 @@
           - "Mode: {{ recovery_mode }}"
           - "Timestamp: {{ recovery_timestamp }}"
           - "=========================================="
+      tags: [disaster-recovery, notification]
 
   tasks:
     # ========================================================================
@@ -49,6 +52,7 @@
             name: "{{ ebpf_service }}"
             state: stopped
           ignore_errors: true
+          tags: [disaster-recovery, phase1, stop]
 
         - name: Stop monitoring services
           systemd:
@@ -56,6 +60,7 @@
             state: stopped
           loop: [prometheus, grafana, loki, promtail, tempo]
           ignore_errors: true
+          tags: [disaster-recovery, phase1, stop]
 
         - name: Kill any remaining processes
           shell: |
@@ -63,12 +68,14 @@
             pkill -f prometheus || true
             pkill -f grafana || true
           ignore_errors: true
+          tags: [disaster-recovery, phase1, stop]
 
         - name: Record services stopped
           copy:
             content: "{{ recovery_timestamp }} All services stopped\n"
             dest: "{{ recovery_log }}"
             mode: "0644"
+          tags: [disaster-recovery, phase1, logging]
 
     # ========================================================================
     # Phase 2: Assess Current State
@@ -79,16 +86,19 @@
           stat:
             path: "{{ ebpf_data_dir }}"
           register: data_dir_status
+          tags: [disaster-recovery, phase2, assess]
 
         - name: Check binary status
           stat:
             path: "{{ ebpf_node_bin }}"
           register: binary_status
+          tags: [disaster-recovery, phase2, assess]
 
         - name: Check disk space
           command: df -h /var/lib
           register: disk_space
           changed_when: false
+          tags: [disaster-recovery, phase2, assess]
 
         - name: Record assessment
           copy:
@@ -99,6 +109,7 @@
               Disk space: {{ disk_space.stdout | default('unknown') }}
             dest: "{{ recovery_log }}"
             mode: "0644"
+          tags: [disaster-recovery, phase2, logging]
 
     # ========================================================================
     # Phase 3: Restore from Backup
@@ -112,23 +123,27 @@
           changed_when: false
           failed_when: false
           when: backup_file | length == 0
+          tags: [disaster-recovery, phase3, backup]
 
         - name: Set backup file
           set_fact:
             backup_file: "{{ latest_backup.stdout | default(backup_file) }}"
           when: backup_file | length == 0
+          tags: [disaster-recovery, phase3, backup]
 
         - name: Verify backup file exists
           stat:
             path: "{{ backup_file }}"
           register: backup_status
           failed_when: backup_file | length > 0 and not backup_status.stat.exists
+          tags: [disaster-recovery, phase3, verify]
 
         - name: Stop service before restore
           systemd:
             name: "{{ ebpf_service }}"
             state: stopped
           ignore_errors: true
+          tags: [disaster-recovery, phase3, stop]
 
         - name: Backup current data (safety net)
           shell: |
@@ -137,6 +152,7 @@
                 -C /var/lib ebpf-blockchain 2>/dev/null || true
             fi
           ignore_errors: true
+          tags: [disaster-recovery, phase3, backup]
 
         - name: Restore RocksDB data
           shell: |
@@ -150,6 +166,7 @@
             fi
           register: restore_result
           when: backup_file | length > 0
+          tags: [disaster-recovery, phase3, restore]
 
         - name: Record restore status
           copy:
@@ -157,6 +174,7 @@
             dest: "{{ recovery_log }}"
             mode: "0644"
           when: restore_result is defined
+          tags: [disaster-recovery, phase3, logging]
 
     # ========================================================================
     # Phase 4: Rebuild from Source (if needed)
@@ -173,6 +191,7 @@
             fi
           args:
             creates: "{{ ebpf_node_dir }}/Cargo.toml"
+          tags: [disaster-recovery, phase4, build]
 
         - name: Build eBPF node
           shell: |
@@ -181,16 +200,19 @@
             cargo build --release --bin ebpf-node
           args:
             creates: "{{ ebpf_node_bin }}"
+          tags: [disaster-recovery, phase4, build]
 
         - name: Verify binary
           stat:
             path: "{{ ebpf_node_bin }}"
           register: binary_check
+          tags: [disaster-recovery, phase4, verify]
 
         - name: Fail if binary not built
           fail:
             msg: "Failed to build binary. Check build logs."
           when: not binary_check.stat.exists
+          tags: [disaster-recovery, phase4, verify]
 
       when: not binary_status.stat.exists | default(true)
 
@@ -207,6 +229,7 @@
           loop: [prometheus, loki, tempo, grafana]
           ignore_errors: true
           when: item in ansible_facts.services
+          tags: [disaster-recovery, phase5, start]
 
         - name: Wait for monitoring to start
           wait_for:
@@ -216,6 +239,7 @@
             - 9090  # prometheus
             - 3000  # grafana
           ignore_errors: true
+          tags: [disaster-recovery, phase5, wait]
 
         - name: Start eBPF blockchain service
           systemd:
@@ -223,6 +247,7 @@
             state: started
             enabled: true
           register: service_start
+          tags: [disaster-recovery, phase5, start]
 
         - name: Wait for service to be running
           shell: |
@@ -232,11 +257,13 @@
           changed_when: false
           retries: 5
           delay: 10
+          tags: [disaster-recovery, phase5, wait]
 
         - name: Verify service is active
           fail:
             msg: "Service failed to start after disaster recovery. Manual intervention required."
           when: active_check.stdout != "active"
+          tags: [disaster-recovery, phase5, verify]
 
     # ========================================================================
     # Phase 6: Post-Recovery Validation
@@ -246,6 +273,7 @@
         - name: Run health checks
           include_tasks: health_check.yml
           ignore_errors: true
+          tags: [disaster-recovery, phase6, health]
 
         - name: Check metrics endpoint
           uri:
@@ -254,6 +282,7 @@
             status_code: 200
           register: metrics_response
           ignore_errors: true
+          tags: [disaster-recovery, phase6, verify]
 
         - name: Record recovery completion
           copy:
@@ -264,6 +293,7 @@
               Metrics available: {{ metrics_response.status | default('unknown') }}
             dest: "{{ recovery_log }}"
             mode: "0644"
+          tags: [disaster-recovery, phase6, logging]
 
   post_tasks:
     - name: Recovery summary
@@ -275,3 +305,4 @@
           - "Timestamp: {{ recovery_timestamp }}"
           - "Log: {{ recovery_log }}"
           - "=========================================="
+      tags: [disaster-recovery, summary]

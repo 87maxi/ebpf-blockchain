@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# Install build tools for eBPF development
+# Centralized role for Rust, toolchain, and dependencies
+# Usage: include_role: name=setup_build_tools
+# =============================================================================
+
+# Install system dependencies for eBPF development
+- name: Install system dependencies
+  apt:
+    name: "{{ build_tools_packages }}"
+    state: present
+    update_cache: true
+  tags: [dependencies, build-tools]
+
+# Install Rust toolchain
+- name: Install Rust toolchain
+  shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+    rustup default nightly
+    rustup component add rust-src
+  args:
+    creates: "{{ rustup_home }}/rustup.toml"
+  environment:
+    CARGO_HOME: "{{ cargo_home }}"
+    RUSTUP_HOME: "{{ rustup_home }}"
+  tags: [dependencies, rust, build-tools]
+
+# Install nightly toolchain with BPF target
+- name: Install nightly toolchain with BPF target
+  shell: |
+    source "$HOME/.cargo/env"
+    rustup toolchain install nightly
+    rustup component add rust-src --toolchain nightly
+    rustup target add x86_64-unknown-linux-gnu --toolchain nightly
+  args:
+    creates: "{{ rustup_home }}/toolchains/nightly"
+  environment:
+    CARGO_HOME: "{{ cargo_home }}"
+    RUSTUP_HOME: "{{ rustup_home }}"
+  tags: [dependencies, rust, bpf, build-tools]
+
+# Install cargo crates
+- name: Install cargo crates (bpf-linker)
+  shell: |
+    source "$HOME/.cargo/env"
+    cargo install bpf-linker
+  args:
+    creates: "{{ cargo_home }}/bin/cargo-bpf-linker"
+  tags: [dependencies, cargo, bpf, build-tools]

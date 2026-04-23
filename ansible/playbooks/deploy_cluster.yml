@@ -12,11 +12,13 @@
     project_dir: /home/maxi/Documentos/source/ebpf-blockchain
 
   tasks:
+    # ---- Network Setup ----
     - name: Ensure lxdbr1 network exists
       shell: |
         if ! lxc network show lxdbr1 >/dev/null 2>&1; then
           lxc network create lxdbr1 ipv4.address={{ base_ip }}.1/24 ipv4.nat=true ipv6.address=none
         fi
+      tags: [cluster, network, deploy]
 
     - name: Enable IP forwarding on host
       sysctl:
@@ -25,6 +27,7 @@
         state: present
         reload: yes
       become: true
+      tags: [cluster, network, deploy]
 
     - name: Allow forwarding for lxdbr1 bridge
       iptables:
@@ -33,12 +36,14 @@
         out_interface: lxdbr1
         jump: ACCEPT
       become: true
+      tags: [cluster, network, deploy]
 
     - name: Allow all traffic for P2P communication
       iptables:
         chain: FORWARD
         jump: ACCEPT
       become: true
+      tags: [cluster, network, deploy]
 
     - name: Configure iptables for P2P ports
       iptables:
@@ -47,22 +52,28 @@
         destination_port: 50000
         jump: ACCEPT
       become: true
+      tags: [cluster, network, deploy]
+
+    # ---- LXC Node Creation ----
     - name: Launch LXC nodes
       shell: |
         if ! lxc info ebpf-node-{{ item }} >/dev/null 2>&1; then
           lxc launch ubuntu:24.04 ebpf-node-{{ item }} -p ebpf-blockchain
         fi
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, nodes, deploy]
 
     - name: Wait for nodes
       pause:
         seconds: 25
+      tags: [cluster, nodes, deploy]
 
     - name: Set LXC limits for eBPF
       shell: |
         lxc config set ebpf-node-{{ item }} limits.memory.swap false
         lxc config set ebpf-node-{{ item }} security.privileged true
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, nodes, config]
 
     - name: Freeze DNS configuration
       shell: |
@@ -73,7 +84,9 @@
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       ignore_errors: true
+      tags: [cluster, nodes, config]
 
+    # ---- Network Configuration ----
     - name: Configure network for each node (Fixing Gateway to 192.168.2.1)
       shell: |
         IP="{{ base_ip }}.$(({{ start_ip }} + {{ item }}))"
@@ -98,7 +111,9 @@
 
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, network, config]
 
+    # ---- Dependencies Installation ----
     - name: Install system deps + eBPF debug tools
       shell: |
         lxc exec ebpf-node-{{ item }} -- bash -c "
@@ -114,11 +129,13 @@
             python3 python3-pip pahole rocksdb-tools
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, dependencies, install]
 
     - name: Install Rust
       shell: |
         lxc exec ebpf-node-{{ item }} -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, dependencies, rust, install]
 
     - name: Install Rust nightly
       ansible.builtin.shell: |
@@ -130,11 +147,14 @@
       retries: 3
       delay: 30
       until: install_result.rc == 0
+      tags: [cluster, dependencies, rust, install]
 
+    # ---- Project Setup ----
     - name: Mount project
       shell: |
         lxc config device add ebpf-node-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, mount, deploy]
 
     - name: Configure RocksDB inspection alias
       shell: |
@@ -142,14 +162,18 @@
           grep -q 'rocksdb-inspect' /root/.bashrc || echo \"alias rocksdb-inspect='ldb --db=/root/ebpf-blockchain/data/\$(hostname)'\" >> /root/.bashrc
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, config, tools]
 
     - name: Detach any existing XDP programs
       shell: "lxc exec ebpf-node-{{ item }} -- ip link set dev eth0 xdp off 2>/dev/null || true"
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
+      tags: [cluster, xdp, cleanup]
 
+    # ---- Build and Start ----
     - name: Build eBPF node (on node 1)
       shell: |
         lxc exec ebpf-node-1 -- bash -c "source /root/.cargo/env && cd /root/ebpf-blockchain/ebpf-node && cargo build --release"
+      tags: [cluster, build, deploy]
 
     - name: Start node 1 and get Peer ID
       shell: |
@@ -157,23 +181,29 @@
         sleep 5
         lxc exec ebpf-node-1 -- cat /tmp/peer_id.txt | tr -d '\r\n'
       register: node1_peer_id
+      tags: [cluster, nodes, start]
 
     - name: Start remaining P2P nodes
       shell: |
         IP1="{{ base_ip }}.$(({{ start_ip }} + 1))"
         nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}'" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
       loop: "{{ range(2, num_nodes | int + 1) | list }}"
+      tags: [cluster, nodes, start, p2p]
 
+    # ---- Monitoring Setup ----
     - name: Configure Prometheus
       template:
         src: "{{ playbook_dir }}/../roles/monitoring/templates/prometheus.yml.j2"
         dest: "{{ project_dir }}/monitoring/prometheus/prometheus.yml"
         mode: "0644"
+      tags: [cluster, monitoring, deploy]
 
     - name: Restart Prometheus
       shell: "docker restart prometheus"
       failed_when: false
+      tags: [cluster, monitoring, deploy]
 
     - name: Show result
       debug:
         msg: "Cluster ready! Nodes: {{ num_nodes }} | Grafana: http://localhost:3000 | Prometheus: http://localhost:9090 | Logs: lxc exec ebpf-node-1 -- tail -f /tmp/ebpf.log"
+      tags: [cluster, summary]

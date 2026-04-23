@@ -14,8 +14,9 @@
     ebpf_service: "ebpf-blockchain"
     ebpf_data_dir: "/var/lib/ebpf-blockchain"
     ebpf_log_dir: "/var/log/ebpf-blockchain"
+    # TAREA 4.2: RPC port changed to 8080 to avoid Grafana conflict
     metrics_port: 9090
-    rpc_port: 3000
+    rpc_port: 8080
     p2p_port: 50000
 
   tasks:

@@ -1,38 +1,39 @@
 [Unit]
 Description=eBPF Blockchain Node
-After=network-online.target
+After=network.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-Group=root
-WorkingDirectory=/root/ebpf-blockchain
-ExecStartPre=/bin/mkdir -p /var/log/ebpf-node
-ExecStartPre=/bin/chmod -R 755 /var/log/ebpf-node
-ExecStart=/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node --iface {{ ansible_default_ipv4.interface | default('eth0') }}
+WorkingDirectory={{ node_working_dir }}
+ExecStart={{ node_binary_dir }}/ebpf-node --iface {{ node_interface | default('eth0') }} \
+    --rpc-port {{ node_rpc_port }} \
+    --p2p-port {{ node_p2p_port }} \
+    --metrics-port {{ node_metrics_port }} \
+    --validator \
+    --bootnodes {{ bootnodes | default('') }}
 Restart=always
 RestartSec=10
-StandardOutput=append:/var/log/ebpf-node/ebpf-node.log
-StandardError=append:/var/log/ebpf-node/ebpf-node.log
-SyslogIdentifier=ebpf-blockchain
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ebpf-node
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+ReadWritePaths={{ node_data_dir }} {{ node_log_dir }}
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-
-# Resources
-LimitNOFILE=65535
-LimitMEMLOCK=Infinity
 
 # Environment
-Environment=RUST_LOG=info
-Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUST_LOG=info,libp2p=info,ebpf_node=info
+Environment=NODE_ID={{ node_id | default('') }}
+Environment=VALIDATOR_MODE={{ validator_mode | default('false') }}
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target

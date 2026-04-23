@@ -45,6 +45,42 @@
     state: directory
   changed_when: false
 
+- name: Create grafana dashboards directory
+  file:
+    path: "{{ project_dir }}/monitoring/grafana/dashboards"
+    state: directory
+  changed_when: false
+
+- name: Create alertmanager directory
+  file:
+    path: "{{ project_dir }}/monitoring/alertmanager"
+    state: directory
+  changed_when: false
+
+- name: Create loki directory
+  file:
+    path: "{{ project_dir }}/monitoring/loki"
+    state: directory
+  changed_when: false
+
+- name: Create promtail directory
+  file:
+    path: "{{ project_dir }}/monitoring/promtail"
+    state: directory
+  changed_when: false
+
+- name: Create tempo directory
+  file:
+    path: "{{ project_dir }}/monitoring/tempo"
+    state: directory
+  changed_when: false
+
+- name: Create node-exporter directory
+  file:
+    path: "{{ project_dir }}/monitoring/node-exporter"
+    state: directory
+  changed_when: false
+
 - name: Deploy Prometheus configuration
   template:
     src: prometheus.yml.j2

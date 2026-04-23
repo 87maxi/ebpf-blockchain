@@ -15,48 +15,63 @@
   vars:
     deployment_version: "{{ lookup('env', 'DEPLOYMENT_VERSION', default='latest') }}"
     rollback_on_failure: true
-    ebpf_node_dir: "/root/ebpf-blockchain"
-    ebpf_node_bin: "{{ ebpf_node_dir }}/ebpf-node/target/release/ebpf-node"
-    ebpf_data_dir: "/var/lib/ebpf-blockchain"
-    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    # TAREA 4.1: Use unified variables from group_vars
+    ebpf_node_dir: "{{ node_working_dir }}"
+    ebpf_node_bin: "{{ node_binary_dir }}/{{ node_binary_name }}"
+    ebpf_data_dir: "{{ node_data_dir }}"
+    ebpf_log_dir: "{{ node_log_dir }}"
     min_disk_space_mb: 5120
     min_free_memory_mb: 1024
     deployment_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
     deployment_log: "{{ ebpf_log_dir }}/deployment_{{ deployment_timestamp }}.log"
 
   pre_tasks:
+    # TAREA 4.4: Tags for selective execution
+    - name: Create log directory for deployment logging
+      file:
+        path: "{{ ebpf_log_dir }}"
+        state: directory
+        mode: "0755"
+      tags: [deploy, logging]
+
     - name: Pre-deployment checks
       block:
         - name: Check disk space
           shell: df -m /var/lib | tail -1 | awk '{print $4}'
           register: disk_free_mb
           changed_when: false
+          tags: [check, deploy]
 
         - name: Fail if disk space insufficient
           fail:
             msg: "Insufficient disk space. Available: {{ disk_free_mb.stdout }}MB, Required: {{ min_disk_space_mb }}MB"
           when: disk_free_mb.stdout | int < min_disk_space_mb
+          tags: [check, deploy]
 
         - name: Check available memory
           shell: free -m | awk '/Mem:/ {print $4}'
           register: memory_free_mb
           changed_when: false
+          tags: [check, deploy]
 
         - name: Fail if memory insufficient
           fail:
             msg: "Insufficient memory. Available: {{ memory_free_mb.stdout }}MB, Required: {{ min_free_memory_mb }}MB"
           when: memory_free_mb.stdout | int < min_free_memory_mb
+          tags: [check, deploy]
 
         - name: Check Rust is installed
-          command: rustc --version
+          shell: /root/.cargo/bin/rustc --version
           register: rust_version
           changed_when: false
           failed_when: false
+          tags: [check, deploy, rust]
 
         - name: Verify Rust installation
           fail:
-            msg: "Rust is not installed. Please run the dependencies playbook first."
-          when: rust_version.rc != 0
+            msg: "Rust is not installed. Please run: ansible-playbook ansible/playbooks/setup_ebpf_nodes.yml -i ansible/inventory/hosts.yml"
+          when: rust_version.rc != 0 or "rustc" not in rust_version.stdout
+          tags: [check, deploy, rust]
 
       rescue:
         - name: Log pre-deployment check failure
@@ -80,20 +95,33 @@
         - "{{ ebpf_log_dir }}"
         - "{{ ebpf_log_dir }}/backups"
         - "/var/log/ebpf-node"
+      tags: [deploy, directories]
 
     # ---- Build from Source ----
     - name: Clone/Pull repository
       shell: |
         cd {{ ebpf_node_dir }}
-        if [ -d .git ]; then
-          git pull --ff-only
+        
+        # Check if the workspace Cargo.toml already exists (build already done)
+        if [ -f "ebpf-node/Cargo.toml" ] || [ -f "Cargo.toml" ]; then
+          echo "Repository already cloned and built. Skipping git operations."
+        elif [ -d .git ]; then
+          # Git directory exists but Cargo.toml missing - verify remote is configured
+          if git remote -v | grep -q origin; then
+            git pull --ff-only
+          else
+            echo "Git directory exists but no remote configured. Re-cloning..."
+            rm -rf /root/ebpf-blockchain-tmp
+            mv /root/ebpf-blockchain /root/ebpf-blockchain-tmp 2>/dev/null || true
+            git clone {{ git_repo_url | default('https://github.com/user/ebpf-blockchain.git') }} {{ ebpf_node_dir }}
+            rm -rf /root/ebpf-blockchain-tmp
+          fi
         else
           git clone {{ git_repo_url | default('https://github.com/user/ebpf-blockchain.git') }} {{ ebpf_node_dir }}
         fi
-      args:
-        creates: "{{ ebpf_node_dir }}/Cargo.toml"
       register: git_pull
       changed_when: git_pull.rc == 0
+      tags: [deploy, git]
 
     - name: Build eBPF node in release mode
       shell: |
@@ -106,12 +134,14 @@
       changed_when: cargo_build.rc == 0
       retries: 2
       delay: 10
+      tags: [build, deploy]
 
     - name: Verify binary
       stat:
         path: "{{ ebpf_node_bin }}"
       register: binary_check
       failed_when: not binary_check.stat.exists
+      tags: [build, deploy]
 
     # ---- Service Deployment ----
     - name: Deploy systemd service file
@@ -120,10 +150,21 @@
         dest: /etc/systemd/system/ebpf-blockchain.service
         mode: "0644"
       notify: restart ebpf-blockchain
+      tags: [deploy, service]
 
     - name: Reload systemd daemon
       systemd:
         daemon_reload: yes
+      tags: [deploy, service]
+
+    - name: Stop any running instances and clean RocksDB locks
+      shell: |
+        pkill -9 ebpf-node 2>/dev/null || true
+        rm -f {{ ebpf_data_dir }}/data/*/LOCK
+        rm -f {{ ebpf_data_dir }}/data/*/LOCK.mbp
+      register: clean_locks
+      changed_when: clean_locks.rc == 0
+      tags: [deploy, service]
 
     - name: Enable and start eBPF service
       systemd:
@@ -131,6 +172,7 @@
         enabled: yes
         state: started
       register: service_status
+      tags: [deploy, service]
 
     - name: Wait for service to be running
       shell: |
@@ -140,16 +182,19 @@
       changed_when: false
       retries: 5
       delay: 10
+      tags: [deploy, service]
 
     - name: Verify service is active
       fail:
         msg: "Service ebpf-blockchain failed to start. Check: journalctl -u ebpf-blockchain -n 50"
       when: active_check.stdout != "active"
+      tags: [deploy, service]
 
     # ---- Post-deployment Validation ----
     - name: Run post-deployment health checks
       include_tasks: health_check.yml
-      ignore_errors: yes
+      ignore_errors: true
+      tags: [deploy, health]
 
   post_tasks:
     - name: Deployment summary

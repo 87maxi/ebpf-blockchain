@@ -4,6 +4,44 @@
 # Project configuration
 project_dir: /home/maxi/Documentos/source/ebpf-blockchain
 
+# =============================================================================
+# TAREA 4.1: Unified directory variables
+# =============================================================================
+# Source directory (build machine)
+project_source_dir: /home/maxi/Documentos/source/ebpf-blockchain
+# Working directory on remote nodes
+node_working_dir: /root/ebpf-blockchain
+# Data directory for RocksDB and persistent storage
+node_data_dir: /var/lib/ebpf-blockchain
+# Log directory
+node_log_dir: /var/log/ebpf-blockchain
+# Binary directory
+node_binary_dir: "{{ node_working_dir }}/ebpf-node/target/release"
+# Binary name
+node_binary_name: ebpf-node
+
+# =============================================================================
+# TAREA 4.2: Node ports (RPC port changed from 3000 to 8080 to avoid Grafana conflict)
+# =============================================================================
+# Node ports
+node_metrics_port: 9090
+node_p2p_port: 50000
+node_rpc_port: 8080
+node_grafana_port: 3000
+
+# =============================================================================
+# TAREA 9-10: Consensus and bootnodes configuration
+# =============================================================================
+# Node interface (default)
+node_interface: eth0
+
+# Consensus configuration
+validator_mode: true
+consensus_round_timeout: 30
+
+# Bootnodes configuration (will be populated dynamically per node)
+bootnodes: []
+
 # LXC configuration
 lxc_defaults:
   image: ubuntu:22.04
@@ -26,7 +64,23 @@ node_defaults:
   home: /root
   rust_version: nightly
 
-# Monitoring configuration
+# Monitoring ports
+prometheus_port: 9090
+alertmanager_port: 9093
+grafana_port: 3000
+loki_port: 3100
+promtail_port: 9080
+tempo_port: 3200
+node_exporter_port: 9100
+
+# Grafana admin credentials
+grafana_admin_user: admin
+grafana_admin_password: admin
+
+# Loki nodes config (SSH nodes to scrape)
+loki_nodes_config: '[]'
+
+# Monitoring configuration (legacy, for backward compatibility)
 monitoring:
   prometheus:
     port: 9090
@@ -53,6 +107,20 @@ system_packages:
   - bc
   - bison
   - flex
+
+# Build tools for centralized setup_build_tools role
+build_tools_packages:
+  - build-essential
+  - pkg-config
+  - libssl-dev
+  - llvm
+  - clang
+  - cmake
+  - libelf-dev
+  - linux-headers-generic
+
+rustup_home: "{{ ansible_env.HOME }}/.rustup"
+cargo_home: "{{ ansible_env.HOME }}/.cargo"
 
 rust_crates:
   - bpf-linker

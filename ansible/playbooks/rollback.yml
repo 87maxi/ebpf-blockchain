@@ -23,11 +23,13 @@
     rollback_log: "{{ ebpf_log_dir }}/rollback_{{ rollback_timestamp }}.log"
 
   pre_tasks:
+    # ---- Rollback Pre-checks ----
     - name: Record rollback initiation
       copy:
         content: "{{ rollback_timestamp }} ROLLBACK INITIATED - Version: {{ rollback_version }}\n"
         dest: "{{ rollback_log }}"
         mode: "0644"
+      tags: [rollback, logging]
 
     - name: Check backup availability
       shell: |
@@ -35,11 +37,13 @@
       register: backup_files
       changed_when: false
       failed_when: false
+      tags: [rollback, check, backup]
 
     - name: Verify backup exists for data rollback
       fail:
         msg: "No backup found. Cannot rollback data without a backup. Check: {{ ebpf_log_dir }}/backups/"
       when: rollback_data and (backup_files.stdout | length == 0)
+      tags: [rollback, check, backup]
 
   tasks:
     # ---- Stop Current Service ----
@@ -48,6 +52,7 @@
         name: ebpf-blockchain
         state: stopped
       ignore_errors: yes
+      tags: [rollback, service, stop]
 
     - name: Record service stopped
       copy:
@@ -55,6 +60,7 @@
         dest: "{{ rollback_log }}"
         mode: "0644"
       when: rollback_log is defined
+      tags: [rollback, logging]
 
     # ---- Backup Current State ----
     - name: Backup current data directory
@@ -68,6 +74,7 @@
         fi
       register: backup_result
       changed_when: "'Backup created' in backup_result.stdout"
+      tags: [rollback, backup, data]
 
     # ---- Restore Previous Version ----
     - name: Rollback binary to previous version
@@ -88,12 +95,14 @@
         fi
       register: rollback_binary
       changed_when: true
+      tags: [rollback, binary, restore]
 
     - name: Record binary rollback status
       copy:
         content: "{{ rollback_timestamp }} Binary: {{ rollback_binary.stdout_lines[-1] }}\n"
         dest: "{{ rollback_log }}"
         mode: "0644"
+      tags: [rollback, logging]
 
     - name: Rollback data directory
       shell: |
@@ -110,6 +119,7 @@
         fi
       when: rollback_data
       ignore_errors: yes
+      tags: [rollback, data, restore]
 
     # ---- Start Service ----
     - name: Start service with rolled-back version
@@ -118,6 +128,7 @@
         state: started
         enabled: yes
       register: service_start
+      tags: [rollback, service, start]
 
     - name: Wait for service to be running
       shell: |
@@ -127,22 +138,26 @@
       changed_when: false
       retries: 5
       delay: 10
+      tags: [rollback, service, wait]
 
     # ---- Verify Rollback ----
     - name: Verify service is active after rollback
       fail:
         msg: "Service failed to start after rollback. Manual intervention required."
       when: active_check.stdout != "active"
+      tags: [rollback, verify]
 
     - name: Run post-rollback health checks
       include_tasks: health_check.yml
-      ignore_errors: yes
+      ignore_errors: true
+      tags: [rollback, health]
 
     - name: Record rollback completion
       copy:
         content: "{{ rollback_timestamp}} ROLLBACK COMPLETED - Version: {{ rollback_version }} - Status: SUCCESS\n"
         dest: "{{ rollback_log }}"
         mode: "0644"
+      tags: [rollback, logging]
 
   post_tasks:
     - name: Rollback summary
@@ -154,3 +169,4 @@
           - "Timestamp: {{ rollback_timestamp }}"
           - "Log: {{ rollback_log }}"
           - "============================================"
+      tags: [rollback, summary]
