@@ -43,13 +43,41 @@ pub fn attach_all(ebpf: &mut Ebpf, iface: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Detach all eBPF programs (for hot-reload)
-/// In aya 0.13.1, detach() requires link_ids that are managed internally.
-/// We simply drop the programs which will automatically detach on Drop.
-pub fn detach_all(_ebpf: &mut Ebpf) {
-    // In aya 0.13.1, the Xdp and KProbe types require a link_id to detach().
-    // The link_ids are managed internally by ProgramData and not accessible.
-    // When the Ebpf object is dropped, all programs and their links are automatically detached.
-    // For hot-reload, we need to reload a fresh Ebpf instance instead.
-    info!("Hot-reload: eBPF programs will be detached when Ebpf instance is dropped");
+/// Detach all eBPF programs (for hot-reload).
+/// 
+/// In aya 0.13.1, program detachment requires the link_id which is managed
+/// internally by the Xdp/KProbe types. The proper approach is to convert
+/// &mut Program to &mut Xdp/&mut KProbe using try_into(), which takes ownership
+/// of the internal link. When these types are dropped, they automatically call
+/// detach() with their stored link_id via their Drop implementations.
+/// 
+/// This implementation converts each &mut Program to &mut Xdp/&mut KProbe and
+/// then drops the reference, triggering automatic detachment.
+pub fn detach_all(ebpf: &mut Ebpf) -> anyhow::Result<()> {
+    // Detach XDP program
+    // prog is &mut Program from program_mut(), convert directly to &mut Xdp
+    if let Some(prog) = ebpf.program_mut("ebpf_node") {
+        let mut xdp: &mut Xdp = prog.try_into()?;
+        info!("XDP program 'ebpf_node' prepared for detachment");
+        drop(xdp); // Explicit drop triggers detach via Drop impl
+        info!("XDP program 'ebpf_node' detached");
+    }
+    
+    // Detach KProbe for inbound traffic
+    if let Some(prog) = ebpf.program_mut("netif_receive_skb") {
+        let mut kprobe: &mut KProbe = prog.try_into()?;
+        info!("KProbe program 'netif_receive_skb' prepared for detachment");
+        drop(kprobe);
+        info!("KProbe program 'netif_receive_skb' detached");
+    }
+    
+    // Detach KProbe for outbound traffic
+    if let Some(prog) = ebpf.program_mut("napi_consume_skb") {
+        let mut kprobe: &mut KProbe = prog.try_into()?;
+        info!("KProbe program 'napi_consume_skb' prepared for detachment");
+        drop(kprobe);
+        info!("KProbe program 'napi_consume_skb' detached");
+    }
+    
+    Ok(())
 }

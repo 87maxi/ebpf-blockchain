@@ -2,7 +2,7 @@ use axum::{extract::State, Json, http::StatusCode, response::IntoResponse, extra
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::config::node::{NodeState, PeerListResponse, PeerDetail, NetworkConfigResponse, GossipsubParams, format_iso_timestamp, get_current_timestamp};
+use crate::config::node::{NodeState, PeerListResponse, PeerDetail, NetworkConfigResponse, GossipsubParams, format_iso_timestamp, get_current_timestamp, Transaction, SyncResponse};
 use crate::config::cli::get_ip_from_multiaddr;
 
 /// GET /api/v1/network/peers - Connected peers list
@@ -53,6 +53,31 @@ pub async fn network_config_get_handler(State(state): State<Arc<NodeState>>) -> 
     };
     
     (StatusCode::OK, Json(response))
+}
+
+/// POST /api/v1/network/sync - On-demand sync endpoint (TAREA 2.6)
+pub async fn network_sync_handler(
+    State(state): State<Arc<NodeState>>,
+) -> Result<Json<crate::config::node::SyncResponse>, (StatusCode, String)> {
+    // Scan DB and return all transactions
+    let mut transactions = Vec::new();
+    for item in state.db.iterator(rocksdb::IteratorMode::Start) {
+        if let Ok((key, value)) = item {
+            let key_str = String::from_utf8(key.to_vec());
+            if let Ok(k) = key_str {
+                if k.starts_with("tx:") || k.starts_with("block:") {
+                    // Skip non-transaction keys
+                    if k.starts_with("block:") {
+                        continue;
+                    }
+                    if let Ok(tx) = bincode::deserialize::<Transaction>(&value) {
+                        transactions.push(tx);
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(SyncResponse { transactions }))
 }
 
 /// PUT /api/v1/network/config - Update network configuration

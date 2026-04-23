@@ -141,4 +141,46 @@ impl SybilProtection {
         info!(peer_id = %peer_id, "Peer removed from whitelist");
         Ok(())
     }
+    
+    // =============================================================================
+    // TAREA 4.7: Initialize whitelist with bootstrap peers
+    // =============================================================================
+    
+    /// Initialize whitelist with bootstrap peers
+    pub fn init_whitelist(&self, bootstrap_peers: Vec<String>) -> anyhow::Result<()> {
+        use libp2p::identity::PeerId as Libp2pPeerId;
+        
+        for peer_str in bootstrap_peers {
+            if let Ok(peer_id) = peer_str.parse::<Libp2pPeerId>() {
+                self.add_to_whitelist(peer_id)?;
+            } else {
+                warn!(peer_str = %peer_str, "Invalid peer ID format, skipping whitelist addition");
+            }
+        }
+        let count = self.get_whitelisted_peer_count();
+        info!(whitelist_count = count, "Whitelist initialized with {} peers", count);
+        Ok(())
+    }
+    
+    /// Get the count of whitelisted peers
+    pub fn get_whitelisted_peer_count(&self) -> usize {
+        let mut count = 0;
+        let iter = self.db.iterator(rocksdb::IteratorMode::Start);
+        
+        for item in iter {
+            if let Ok((key, value)) = item {
+                if let (Ok(key_str), Ok(value_str)) =
+                    (String::from_utf8(key.to_vec()), String::from_utf8(value.to_vec()))
+                {
+                    if key_str.starts_with("whitelist_peer:") {
+                        if value_str == "trusted" || value_str == "verified" {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        count
+    }
 }

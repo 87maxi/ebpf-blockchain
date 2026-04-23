@@ -24,6 +24,8 @@ pub fn create_router(
         .route("/api/v1/network/peers", get(crate::api::network::network_peers_handler))
         .route("/api/v1/network/config", get(crate::api::network::network_config_get_handler))
         .route("/api/v1/network/config", put(crate::api::network::network_config_put_handler))
+        // TAREA 2.6: On-demand sync endpoint
+        .route("/api/v1/network/sync", post(crate::api::network::network_sync_handler))
         // REST API v1 - Transactions
         .route("/api/v1/transactions", post(crate::api::transactions::transactions_create_handler))
         .route("/api/v1/transactions/:id", get(crate::api::transactions::transactions_get_handler))
