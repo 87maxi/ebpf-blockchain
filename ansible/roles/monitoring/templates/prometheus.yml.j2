@@ -17,10 +17,10 @@ scrape_configs:
 
   - job_name: 'ebpf_nodes'
     static_configs:
-{% for i in range(1, 4) %}
-      - targets: ['192.168.2.{{ 10 + i }}:9090']
+{% for host in groups['lxc_nodes'] %}
+      - targets: ['{{ hostvars[host].node_ip }}:9090']
         labels:
-          node_name: 'ebpf-node-{{ i }}'
+          node_name: '{{ hostvars[host].node_name }}'
           node_type: 'ebpf'
 {% endfor %}
 
@@ -40,4 +40,5 @@ scrape_configs:
         labels:
           node_name: '{{ hostvars[host].node_name }}'
           node_type: 'victim'
+          targeted_by: '{{ hostvars[host].targeted_by | default("unknown") }}'
 {% endfor %}

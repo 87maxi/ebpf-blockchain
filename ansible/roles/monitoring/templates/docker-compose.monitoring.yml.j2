@@ -1,104 +1,217 @@
 version: '3.8'
 
 services:
+  # =====================
+  # PROMETHEUS - Metrics Storage & Alerting
+  # =====================
   prometheus:
     image: prom/prometheus:v2.48.0
-    container_name: prometheus
+    container_name: ebpf-prometheus
+    restart: unless-stopped
+    ports:
+      - "{{ prometheus_port | default('9090') }}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     volumes:
-      - ./prometheus:/etc/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--storage.tsdb.retention.size=10GB'
       - '--web.enable-lifecycle'
-    ports:
-      - "{{ prometheus_port | default('9090') }}:9090"
+      - '--web.enable-admin-api'
     networks:
       - ebpf-observability
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # ALERTMANAGER - Alert Routing
+  # =====================
   alertmanager:
     image: prom/alertmanager:v0.26.0
-    container_name: alertmanager
+    container_name: ebpf-alertmanager
+    restart: unless-stopped
+    ports:
+      - "{{ alertmanager_port | default('9093') }}:9093"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
-      - ./alertmanager:/etc/alertmanager
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
-    ports:
-      - "{{ alertmanager_port | default('9093') }}:9093"
+      - '--storage.path=/alertmanager'
+      - '--web.listen-address=0.0.0.0:9093'
     networks:
       - ebpf-observability
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # GRAFANA - Visualization
+  # =====================
   grafana:
     image: grafana/grafana:10.2.0
-    container_name: grafana
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    container_name: ebpf-grafana
+    restart: unless-stopped
+    ports:
+      - "{{ grafana_port | default('3000') }}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       - GF_SECURITY_ADMIN_USER={{ grafana_admin_user | default('admin') }}
       - GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password | default('admin') }}
       - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - "{{ grafana_port | default('3000') }}:3000"
-    networks:
-      - ebpf-observability
+      - GF_SERVER_ROOT_URL={{ grafana_root_url | default('http://localhost:3000') }}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+      - grafana-config:/etc/grafana
     depends_on:
       - prometheus
       - loki
-    restart: unless-stopped
+      - tempo
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # LOKI - Log Aggregation
+  # =====================
   loki:
     image: grafana/loki:2.9.0
-    container_name: loki
+    container_name: ebpf-loki
+    restart: unless-stopped
+    ports:
+      - "{{ loki_port | default('3100') }}:3100"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
-      - ./loki:/etc/loki
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     command:
       - '-config.file=/etc/loki/loki-config.yml'
-    ports:
-      - "{{ loki_port | default('3100') }}:3100"
     networks:
       - ebpf-observability
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # PROMTAIL - Log Collector
+  # =====================
   promtail:
     image: grafana/promtail:2.9.0
-    container_name: promtail
+    container_name: ebpf-promtail
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9080/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
-      - ./promtail:/etc/promtail
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/log:/var/log:ro
+      - promtail-data:/tmp/promtail
     command:
       - '-config.file=/etc/promtail/promtail-config.yml'
+    depends_on:
+      - loki
     networks:
       - ebpf-observability
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # EBPF LOG FORWARDER - Collect logs from remote nodes via SSH
+  # =====================
+  ebpf-log-forwarder:
+    image: python:3.11-slim
+    container_name: ebpf-log-forwarder
+    restart: unless-stopped
+    volumes:
+      - ./promtail/ebpf-log-forwarder.py:/app/ebpf-log-forwarder.py:ro
+      - ./promtail/positions.json:/app/positions.json:rw
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python /app/ebpf-log-forwarder.py
+    depends_on:
+      - loki
+    networks:
+      - ebpf-observability
+    labels:
+      org.label-schema.group: "observability"
+
+  # =====================
+  # TEMPO - Distributed Tracing
+  # =====================
   tempo:
     image: grafana/tempo:2.3.0
-    container_name: tempo
+    container_name: ebpf-tempo
+    restart: unless-stopped
+    ports:
+      - "{{ tempo_port | default('3200') }}:3200"
+      - "9097:9097"
+      - "4317:4317"
+      - "4318:4318"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
-      - ./tempo:/etc/tempo
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
       - tempo-data:/tmp/tempo
     command:
       - '-config.file=/etc/tempo/tempo-config.yml'
-    ports:
-      - "{{ tempo_port | default('3200') }}:3200"
-      - "4317:4317"
-      - "4318:4318"
     networks:
       - ebpf-observability
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
+  # =====================
+  # NODE EXPORTER - System Metrics
+  # =====================
   node-exporter:
     image: prom/node-exporter:v1.7.0
-    container_name: node-exporter
+    container_name: ebpf-node-exporter
+    restart: unless-stopped
+    ports:
+      - "{{ node_exporter_port | default('9100') }}:9100"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -106,29 +219,12 @@ services:
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    ports:
-      - "{{ node_exporter_port | default('9100') }}:9100"
     networks:
       - ebpf-observability
-    restart: unless-stopped
-
-  ebpf-log-forwarder:
-    build:
-      context: ./promtail
-      dockerfile: Dockerfile.log-forwarder
-    container_name: ebpf-log-forwarder
-    volumes:
-      - ./promtail:/app
-      - ./ssh-keys:/root/.ssh:ro
-    environment:
-      - LOKI_URL=http://loki:3100/loki/api/v1/push
-      - NODES_CONFIG={{ loki_nodes_config | default('[]') }}
-    networks:
-      - ebpf-observability
-    depends_on:
-      - loki
-    restart: unless-stopped
+    labels:
+      org.label-schema.group: "observability"
 
 networks:
   ebpf-observability:
@@ -136,7 +232,16 @@ networks:
 
 volumes:
   prometheus-data:
+    driver: local
   alertmanager-data:
+    driver: local
   grafana-data:
+    driver: local
+  grafana-config:
+    driver: local
   loki-data:
+    driver: local
+  promtail-data:
+    driver: local
   tempo-data:
+    driver: local

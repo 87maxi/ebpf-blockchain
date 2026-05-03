@@ -27,81 +27,48 @@
     compose_cmd: "docker-compose"
   when: compose_check.rc != 0
 
-- name: Create monitoring directories
-  file:
-    path: "{{ project_dir }}/monitoring"
-    state: directory
+# ---- Copy monitoring files from repository ----
+- name: Copy monitoring directory to target
+  synchronize:
+    src: "{{ project_dir }}/monitoring/"
+    dest: "{{ project_dir }}/monitoring/"
+    recursive: yes
+    rsync_opts:
+      - "--exclude=__pycache__"
+      - "--exclude=.git"
   changed_when: false
+  ignore_errors: true
 
-- name: Create prometheus config directory
-  file:
-    path: "{{ project_dir }}/monitoring/prometheus"
-    state: directory
-  changed_when: false
-
-- name: Create grafana provisioning directories
-  file:
-    path: "{{ project_dir }}/monitoring/grafana/provisioning/{dashboards,datasources}"
-    state: directory
-  changed_when: false
-
-- name: Create grafana dashboards directory
-  file:
-    path: "{{ project_dir }}/monitoring/grafana/dashboards"
-    state: directory
-  changed_when: false
-
-- name: Create alertmanager directory
-  file:
-    path: "{{ project_dir }}/monitoring/alertmanager"
-    state: directory
-  changed_when: false
-
-- name: Create loki directory
-  file:
-    path: "{{ project_dir }}/monitoring/loki"
-    state: directory
-  changed_when: false
-
-- name: Create promtail directory
-  file:
-    path: "{{ project_dir }}/monitoring/promtail"
-    state: directory
-  changed_when: false
-
-- name: Create tempo directory
-  file:
-    path: "{{ project_dir }}/monitoring/tempo"
-    state: directory
-  changed_when: false
-
-- name: Create node-exporter directory
-  file:
-    path: "{{ project_dir }}/monitoring/node-exporter"
-    state: directory
-  changed_when: false
-
-- name: Deploy Prometheus configuration
+- name: Generate Prometheus configuration from template
   template:
     src: prometheus.yml.j2
     dest: "{{ project_dir }}/monitoring/prometheus/prometheus.yml"
     mode: '0644'
   register: prometheus_config
 
-- name: Create Prometheus docker-compose file
-  template:
-    src: docker-compose.monitoring.yml.j2
-    dest: "{{ project_dir }}/monitoring/docker-compose.yml"
-    mode: '0644'
-  register: compose_file
+- name: Ensure monitoring directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ project_dir }}/monitoring/prometheus/rules"
+    - "{{ project_dir }}/monitoring/grafana/provisioning/dashboards"
+    - "{{ project_dir }}/monitoring/grafana/provisioning/datasources"
+    - "{{ project_dir }}/monitoring/grafana/dashboards"
+    - "{{ project_dir }}/monitoring/loki"
+    - "{{ project_dir }}/monitoring/promtail"
+    - "{{ project_dir }}/monitoring/tempo"
+  changed_when: false
 
+# ---- Start monitoring stack using docker compose from monitoring/ ----
 - name: Start monitoring stack
   shell: |
     cd {{ project_dir }}/monitoring
     {{ compose_cmd }} up -d
   register: compose_up
   changed_when: true
-  when: prometheus_config.changed or compose_file.changed
+  when: prometheus_config.changed | default(true)
 
 - name: Wait for Prometheus to be ready
   wait_for:
@@ -117,35 +84,6 @@
     timeout: 60
   ignore_errors: true
 
-- name: Configure Prometheus datasource in Grafana
-  uri:
-    url: "http://localhost:3000/api/datasources"
-    method: POST
-    user: admin
-    password: admin
-    body_format: json
-    body:
-      name: Prometheus
-      type: prometheus
-      url: http://prometheus:9090
-      access: proxy
-      isDefault: true
-    status_code: [200, 409]
-  ignore_errors: true
-
-- name: Deploy Grafana dashboards
-  template:
-    src: dashboard.json.j2
-    dest: "{{ project_dir }}/monitoring/grafana/provisioning/dashboards/ebpf-cluster.json"
-    mode: '0644'
-  register: dashboard
-
-- name: Reload Grafana to apply dashboards
-  shell: docker restart grafana
-  when: dashboard.changed
-  changed_when: true
-  ignore_errors: true
-
 - name: Display monitoring URLs
   debug:
     msg: |
@@ -153,5 +91,8 @@
       Monitoring Stack
       ========================================
       Prometheus: http://localhost:9090
-      Grafana: http://localhost:3000 (admin/admin)
+      Grafana:    http://localhost:3000 (admin/admin)
+      Loki:       http://localhost:3100
+      Tempo:      http://localhost:3200
+      Node Exporter: http://localhost:9100
       ========================================
