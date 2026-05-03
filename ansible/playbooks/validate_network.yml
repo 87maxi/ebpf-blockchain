@@ -1,0 +1,277 @@
+---
+# =============================================================================
+# Network Validation Playbook
+# Verifica condiciones de red entre attacker y victim nodes
+# Escanea logs, verifica conectividad, detecta problemas
+# Uso: ansible-playbook validate_network.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: Network Validation - Attacker/Victim Connectivity
+  hosts: attacker_nodes:victim_nodes:lxc_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: false
+
+  vars:
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    ebpf_service: "ebpf-blockchain"
+    validation_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    correct_subnet_prefix: "192.168.2."
+    subnet_mask: "24"
+    expected_gateway: "192.168.2.1"
+
+  tasks:
+    # ========================================================================
+    # Phase 1: Network Configuration Verification
+    # ========================================================================
+    - name: Phase 1a: Check IP address on eth0
+      shell: ip -4 addr show eth0 | grep -oP 'inet \K[\d.]+'
+      register: node_ip
+      changed_when: false
+      tags: [validate, network]
+
+    - name: Phase 1b: Check subnet mask
+      shell: ip -4 addr show eth0 | grep -oP 'inet [\d.]+/\K\d+'
+      register: node_subnet
+      changed_when: false
+      tags: [validate, network]
+
+    - name: Phase 1c: Check default gateway
+      shell: ip -4 route show default | awk '{print $3}'
+      register: node_gateway
+      changed_when: false
+      tags: [validate, network]
+
+    - name: Phase 1d: Verify all nodes are in same subnet (192.168.2.0/24)
+      assert:
+        that:
+          - "node_ip.stdout is defined"
+          - "node_ip.stdout.startswith(correct_subnet_prefix)"
+          - "node_subnet.stdout == subnet_mask"
+        fail_msg: >
+          {{ inventory_hostname }} is NOT in 192.168.2.0/24 subnet.
+          IP: {{ node_ip.stdout }}, Subnet: {{ node_subnet.stdout }}
+      tags: [validate, network]
+
+    - name: Phase 1e: Verify gateway is correct
+      assert:
+        that:
+          - "node_gateway.stdout == expected_gateway"
+        fail_msg: >
+          {{ inventory_hostname }} gateway is {{ node_gateway.stdout }}, expected {{ expected_gateway }}
+      tags: [validate, network]
+
+    - name: Phase 1f: Report network configuration
+      debug:
+        msg: >
+          Network OK: {{ inventory_hostname }} = {{ node_ip.stdout }}/{{ node_subnet.stdout }},
+          Gateway: {{ node_gateway.stdout }}
+      tags: [validate, network]
+
+    # ========================================================================
+    # Phase 2: Inter-Node Connectivity Tests
+    # ========================================================================
+    - name: Phase 2a: Attacker - Ping all victim nodes
+      when: "'attacker' in group_names"
+      shell: >
+        ping -c 2 -W 3 {{ item }}
+      loop: "{{ groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list }}"
+      register: victim_ping
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, connectivity]
+
+    - name: Phase 2b: Attacker - Ping all normal nodes
+      when: "'attacker' in group_names"
+      shell: >
+        ping -c 2 -W 3 {{ item }}
+      loop: "{{ groups['lxc_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list }}"
+      register: normal_ping
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, connectivity]
+
+    - name: Phase 2c: Victim - Ping all attacker nodes
+      when: "'victim' in group_names"
+      shell: >
+        ping -c 2 -W 3 {{ item }}
+      loop: "{{ groups['attacker_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list }}"
+      register: attacker_ping
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, connectivity]
+
+    - name: Phase 2d: Victim - Ping other victim nodes
+      when: "'victim' in group_names"
+      shell: >
+        ping -c 2 -W 3 {{ item }}
+      loop: "{{ groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list | reject('equalto', hostvars[inventory_hostname].node_ip) }}"
+      register: other_victim_ping
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, connectivity]
+
+    - name: Phase 2e: Normal node - Ping other normal nodes
+      when: "'lxc_nodes' in group_names"
+      shell: >
+        ping -c 2 -W 3 {{ item }}
+      loop: "{{ groups['lxc_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list | reject('equalto', hostvars[inventory_hostname].node_ip) }}"
+      register: other_normal_ping
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, connectivity]
+
+    - name: Phase 2f: Report connectivity status
+      debug:
+        msg: >
+          {{ inventory_hostname }} connectivity:
+          {% if "'attacker' in group_names" %}
+          Victims reachable: {{ victim_ping.results | default([]) | map(attribute='rc') | list | count(0) }}/{{ groups['victim_nodes'] | length }},
+          Normal nodes reachable: {{ normal_ping.results | default([]) | map(attribute='rc') | list | count(0) }}/{{ groups['lxc_nodes'] | length }}
+          {% elif "'victim' in group_names" %}
+          Attackers reachable: {{ attacker_ping.results | default([]) | map(attribute='rc') | list | count(0) }}/{{ groups['attacker_nodes'] | length }},
+          Other victims reachable: {{ other_victim_ping.results | default([]) | map(attribute='rc') | list | count(0) }}/{{ (groups['victim_nodes'] | length) - 1 }}
+          {% elif "'lxc_nodes' in group_names" %}
+          Other normal nodes reachable: {{ other_normal_ping.results | default([]) | map(attribute='rc') | list | count(0) }}/{{ (groups['lxc_nodes'] | length) - 1 }}
+          {% endif %}
+      tags: [validate, connectivity]
+
+    # ========================================================================
+    # Phase 3: Port Accessibility Checks
+    # ========================================================================
+    - name: Phase 3a: Check RPC port is listening
+      wait_for:
+        port: "{{ node_rpc_port | default(8080) }}"
+        timeout: 5
+      register: rpc_port_check
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, ports]
+
+    - name: Phase 3b: Check metrics port is listening
+      wait_for:
+        port: "{{ node_metrics_port | default(9090) }}"
+        timeout: 5
+      register: metrics_port_check
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, ports]
+
+    - name: Phase 3c: Check P2P port is listening
+      wait_for:
+        port: "{{ node_p2p_port | default(50000) }}"
+        timeout: 5
+      register: p2p_port_check
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, ports]
+
+    - name: Phase 3d: Report port status
+      debug:
+        msg: >
+          Ports on {{ inventory_hostname }}:
+          RPC: {{ 'OPEN' if not rpc_port_check.failed | default(false) else 'CLOSED' }},
+          Metrics: {{ 'OPEN' if not metrics_port_check.failed | default(false) else 'CLOSED' }},
+          P2P: {{ 'OPEN' if not p2p_port_check.failed | default(false) else 'CLOSED' }}
+      tags: [validate, ports]
+
+    # ========================================================================
+    # Phase 4: Log Analysis
+    # ========================================================================
+    - name: Phase 4a: Check journal logs for errors
+      shell: |
+        journalctl -u {{ ebpf_service }} --since "1 hour ago" --no-pager 2>/dev/null | \
+          grep -i "error\|panic\|fatal\|failed" | tail -10 || echo "No errors found"
+      register: journal_errors
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, logs]
+
+    - name: Phase 4b: Check application log file for errors
+      shell: |
+        cat {{ ebpf_log_dir }}/ebpf-node.log 2>/dev/null | \
+          grep -i "error\|panic\|fatal\|failed" | tail -10 || echo "No log file or no errors"
+      register: app_errors
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, logs]
+
+    - name: Phase 4c: Check for network-related errors
+      shell: |
+        journalctl -u {{ ebpf_service }} --since "1 hour ago" --no-pager 2>/dev/null | \
+          grep -i "connect\|disconnect\|peer\|handshake\|timeout" | tail -10 || echo "No network errors"
+      register: network_errors
+      changed_when: false
+      ignore_errors: true
+      tags: [validate, logs]
+
+    - name: Phase 4d: Report log analysis
+      debug:
+        msg: |
+          Log Analysis for {{ inventory_hostname }}:
+          Journal Errors: {{ journal_errors.stdout | default('None') }}
+          App Errors: {{ app_errors.stdout | default('None') }}
+          Network Errors: {{ network_errors.stdout | default('None') }}
+      tags: [validate, logs]
+
+    # ========================================================================
+    # Phase 5: Service Health
+    # ========================================================================
+    - name: Phase 5a: Check service status
+      systemd:
+        name: "{{ ebpf_service }}"
+      register: service_status
+      ignore_errors: true
+      tags: [validate, service]
+
+    - name: Phase 5b: Verify service is active
+      assert:
+        that:
+          - "service_status.status.ActiveState == 'active'"
+        fail_msg: "Service {{ ebpf_service }} is not active on {{ inventory_hostname }}"
+      ignore_errors: true
+      tags: [validate, service]
+
+    - name: Phase 5c: Check service uptime
+      shell: systemctl status {{ ebpf_service }} | grep "Active" | head -1
+      register: uptime_status
+      changed_when: false
+      tags: [validate, service]
+
+    - name: Phase 5d: Report service status
+      debug:
+        msg: |
+          Service Status for {{ inventory_hostname }}:
+          Active: {{ service_status.status.ActiveState | default('unknown') }}
+          Uptime: {{ uptime_status.stdout | default('unknown') }}
+      tags: [validate, service]
+
+    # ========================================================================
+    # Phase 6: Generate Validation Report
+    # ========================================================================
+    - name: Phase 6a: Create validation summary directory
+      file:
+        path: "{{ ebpf_log_dir }}/validations"
+        state: directory
+        mode: "0755"
+
+    - name: Phase 6b: Save validation report
+      copy:
+        content: |
+          Network Validation Report
+          =========================
+          Timestamp: {{ validation_timestamp }}
+          Hostname: {{ inventory_hostname }}
+          IP: {{ node_ip.stdout | default('unknown') }}
+          Subnet: {{ node_subnet.stdout | default('unknown') }}/24
+          Gateway: {{ node_gateway.stdout | default('unknown') }}
+          Service: {{ service_status.status.ActiveState | default('unknown') }}
+          RPC Port: {{ 'OPEN' if not rpc_port_check.failed | default(true) else 'CLOSED' }}
+          Metrics Port: {{ 'OPEN' if not metrics_port_check.failed | default(true) else 'CLOSED' }}
+          P2P Port: {{ 'OPEN' if not p2p_port_check.failed | default(true) else 'CLOSED' }}
+          Journal Errors: {{ journal_errors.stdout | default('None') }}
+          App Errors: {{ app_errors.stdout | default('None') }}
+          Network Errors: {{ network_errors.stdout | default('None') }}
+        dest: "{{ ebpf_log_dir }}/validations/{{ inventory_hostname }}_{{ validation_timestamp }}.txt"
+        mode: "0644"
+      ignore_errors: true

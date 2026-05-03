@@ -1,0 +1,156 @@
+---
+# =============================================================================
+# Laboratory Validation Playbook
+# Ejecuta validacion completa del laboratorio
+# Uso: ansible-playbook validate_lab.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: Pre-flight Checks
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  tasks:
+    - name: Check LXD is installed
+      command: lxc info
+      register: lxc_check
+      failed_when: false
+      changed_when: false
+
+    - name: Verify LXD is available
+      assert:
+        that:
+          - "lxc_check.rc == 0"
+        fail_msg: "LXD is not installed or not available"
+
+    - name: Check lxdbr1 network exists
+      shell: lxc network show lxdbr1
+      register: bridge_check
+      failed_when: false
+      changed_when: false
+
+    - name: Verify lxdbr1 bridge
+      assert:
+        that:
+          - "bridge_check.rc == 0"
+        fail_msg: "lxdbr1 bridge does not exist"
+
+    - name: List all containers
+      shell: lxc list
+      register: container_list
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "{{ container_list.stdout }}"
+
+    - name: Verify all required nodes exist
+      shell: lxc info {{ item }} >/dev/null 2>&1 && echo "OK" || echo "MISSING"
+      loop:
+        - ebpf-node-1
+        - ebpf-node-2
+        - ebpf-node-3
+        - ebpf-victim-1
+        - ebpf-victim-2
+        - ebpf-attacker-1
+        - ebpf-attacker-2
+      register: node_exists_check
+      changed_when: false
+
+    - name: Report missing nodes
+      debug:
+        msg: >
+          Node status:
+          {{ node_exists_check.results | map(attribute='stdout') | list }}
+      when: node_exists_check.results | map(attribute='stdout') | list | count('MISSING') > 0
+
+- name: Validate All Nodes
+  hosts: lxc_nodes:attacker_nodes:victim_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: false
+
+  tasks:
+    - name: Verify node is reachable
+      ping:
+      ignore_errors: true
+
+    - name: Check IP configuration
+      shell: ip -4 addr show eth0 | grep 'inet '
+      register: ip_config
+      changed_when: false
+
+    - name: Verify IP is in correct subnet
+      assert:
+        that:
+          - "'192.168.2.' in ip_config.stdout"
+        fail_msg: "{{ inventory_hostname }} is not in 192.168.2.0/24 subnet"
+      ignore_errors: true
+
+    - name: Check service status
+      systemd:
+        name: ebpf-blockchain
+      register: service_status
+      ignore_errors: true
+
+    - name: Report node status
+      debug:
+        msg: |
+          Node: {{ inventory_hostname }}
+          IP: {{ ip_config.stdout | default('unknown') }}
+          Service: {{ service_status.status.ActiveState | default('unknown') }}
+
+- name: Run Network Connectivity Tests
+  hosts: attacker_nodes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Test connectivity to all victims
+      shell: >
+        ping -c 1 -W 2 {{ item }}
+      loop: "{{ groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list }}"
+      register: ping_results
+      changed_when: false
+      ignore_errors: true
+
+    - name: Report connectivity
+      debug:
+        msg: >
+          {{ inventory_hostname }} -> Victims:
+          {{ ping_results.results | map(attribute='stdout') | list }}
+
+- name: Generate Lab Report
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  tasks:
+    - name: Generate summary report
+      copy:
+        content: |
+          eBPF Blockchain Lab Validation Report
+          ======================================
+          Generated: {{ lookup('pipe', 'date') }}
+
+          Network: lxdbr1 (192.168.2.0/24)
+          Gateway: 192.168.2.1
+
+          Nodes:
+          - ebpf-node-1: 192.168.2.210
+          - ebpf-node-2: 192.168.2.211
+          - ebpf-node-3: 192.168.2.212
+          - ebpf-victim-1: 192.168.2.220
+          - ebpf-victim-2: 192.168.2.221
+          - ebpf-attacker-1: 192.168.2.230
+          - ebpf-attacker-2: 192.168.2.231
+
+          Playbooks:
+          - deploy_cluster.yml: Despliega cluster completo
+          - deploy_attacker.yml: Despliega nodos atacante
+          - deploy_victim.yml: Despliega nodos victimas
+          - validate_network.yml: Valida conectividad y logs
+          - validate_lab.yml: Valida laboratorio completo
+          - health_check.yml: Health check general
+        dest: "/tmp/lab_validation_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}.txt"
+        mode: "0644"
