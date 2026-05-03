@@ -1,0 +1,31 @@
+[Unit]
+Description=eBPF Blockchain Node 3
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=maxi
+Group=maxi
+WorkingDirectory=/home/maxi/Documentos/source/ebpf-blockchain
+ExecStart=/usr/bin/rustup run nightly /home/maxi/Documentos/source/ebpf-blockchain/ebpf-node/target/debug/ebpf-node \
+    --iface eth0 \
+    --listen-addresses /ip4/127.0.0.1/tcp/5003 \
+    --bootstrap-peers /ip4/127.0.0.1/tcp/5001,/ip4/127.0.0.1/tcp/5002 \
+    --data-dir /home/maxi/Documentos/source/ebpf-blockchain/data/node3 \
+    --log-dir /home/maxi/Documentos/source/ebpf-blockchain/logs/node3 \
+    --metrics-port 9290 \
+    --rpc-port 9291 \
+    --ws-port 9292
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/maxi/Documentos/source/ebpf-blockchain/logs/node3/stdout.log
+StandardError=append:/home/maxi/Documentos/source/ebpf-blockchain/logs/node3/stderr.log
+
+# eBPF permissions
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN
+SecurityProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
