@@ -160,3 +160,144 @@
           - "RPC: {{ 'PASS' if rpc_response.status == 200 else 'FAIL' }}"
           - "Disk: {{ disk_usage.stdout | default('unknown') }}"
           - "============================================"
+
+# =============================================================================
+# Health Check - Attacker Nodes
+# =============================================================================
+- name: eBPF Attacker Node Health Checks
+  hosts: attacker_nodes
+  become: true
+  gather_facts: yes
+  any_errors_fatal: false
+
+  vars:
+    ebpf_service: "ebpf-attacker"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    metrics_port: 9090
+    rpc_port: 8080
+    p2p_port: 50005
+
+  tasks:
+    - name: Check attacker service status
+      systemd:
+        name: "{{ ebpf_service }}"
+      register: service_status
+      ignore_errors: true
+
+    - name: Verify attacker service is active
+      assert:
+        that:
+          - "service_status.status.ActiveState == 'active'"
+        fail_msg: "Attacker service {{ ebpf_service }} is NOT active on {{ inventory_hostname }}"
+      ignore_errors: true
+
+    - name: Check attacker metrics endpoint
+      uri:
+        url: "http://localhost:{{ metrics_port }}/metrics"
+        return_content: yes
+        status_code: 200
+      register: metrics_response
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check attacker RPC endpoint
+      uri:
+        url: "http://localhost:{{ rpc_port }}/api/v1/node/info"
+        return_content: yes
+        status_code: 200
+      register: rpc_response
+      changed_when: false
+      ignore_errors: true
+
+    - name: Report attacker health
+      debug:
+        msg: |
+          Attacker Health: {{ inventory_hostname }}
+          Service: {{ service_status.status.ActiveState | default('unknown') }}
+          Metrics: {{ 'OK' if metrics_response.status == 200 else 'FAIL' }}
+          RPC: {{ 'OK' if rpc_response.status == 200 else 'FAIL' }}
+
+# =============================================================================
+# Health Check - Victim Nodes
+# =============================================================================
+- name: eBPF Victim Node Health Checks
+  hosts: victim_nodes
+  become: true
+  gather_facts: yes
+  any_errors_fatal: false
+
+  vars:
+    ebpf_service: "ebpf-victim"
+    ebpf_data_dir: "/var/lib/ebpf-blockchain"
+    ebpf_log_dir: "/var/log/ebpf-blockchain"
+    metrics_port: 9090
+    rpc_port: 8080
+    p2p_port: 50003
+
+  tasks:
+    - name: Check victim service status
+      systemd:
+        name: "{{ ebpf_service }}"
+      register: service_status
+      ignore_errors: true
+
+    - name: Verify victim service is active
+      assert:
+        that:
+          - "service_status.status.ActiveState == 'active'"
+        fail_msg: "Victim service {{ ebpf_service }} is NOT active on {{ inventory_hostname }}"
+      ignore_errors: true
+
+    - name: Check victim metrics endpoint
+      uri:
+        url: "http://localhost:{{ metrics_port }}/metrics"
+        return_content: yes
+        status_code: 200
+      register: metrics_response
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check victim RPC endpoint
+      uri:
+        url: "http://localhost:{{ rpc_port }}/api/v1/node/info"
+        return_content: yes
+        status_code: 200
+      register: rpc_response
+      changed_when: false
+      ignore_errors: true
+
+    - name: Report victim health
+      debug:
+        msg: |
+          Victim Health: {{ inventory_hostname }}
+          Service: {{ service_status.status.ActiveState | default('unknown') }}
+          Metrics: {{ 'OK' if metrics_response.status == 200 else 'FAIL' }}
+          RPC: {{ 'OK' if rpc_response.status == 200 else 'FAIL' }}
+
+# =============================================================================
+# Global Lab Health Summary
+# =============================================================================
+- name: Global Lab Health Summary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Display lab summary
+      debug:
+        msg: |
+          =============================================
+          eBPF Blockchain Lab - Health Summary
+          =============================================
+          Normal Nodes: {{ groups['lxc_nodes'] | length }}
+          Victim Nodes: {{ groups['victim_nodes'] | length }}
+          Attacker Nodes: {{ groups['attacker_nodes'] | length }}
+          Total: {{ (groups['lxc_nodes'] | length) + (groups['victim_nodes'] | length) + (groups['attacker_nodes'] | length) }}
+          
+          Network: lxdbr1 (192.168.2.0/24)
+          Gateway: 192.168.2.1
+          
+          Run: ansible-playbook validate_network.yml -i inventory/hosts.yml
+          for detailed network validation
+          =============================================

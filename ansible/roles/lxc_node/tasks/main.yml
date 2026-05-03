@@ -98,13 +98,13 @@
   changed_when: false
 
 - name: Configure node IP address
-  command: lxc exec {{ node_name }} -- ip addr add {{ node_ip }}/24 dev eth0
-  register: ip_config
-  failed_when: false
-  changed_when: false
+      command: lxc exec {{ node_name }} -- ip addr add {{ node_ip }}/24 dev eth0
+      register: ip_config
+      failed_when: false
+      changed_when: false
 
-- name: Configure default route
-  command: lxc exec {{ node_name }} -- ip route add default via {{ lxc_gateway | default('192.168.2.200') }}
+    - name: Configure default route
+      command: lxc exec {{ node_name }} -- ip route add default via {{ lxc_gateway | default('192.168.2.1') }}
   register: route_config
   failed_when: false
   changed_when: false
