@@ -17,6 +17,13 @@
 - [Observabilidad](#-observabilidad)
 - [Dashboards Disponibles](#-dashboards-disponibles)
 - [Sistema de Alertas](#-sistema-de-alertas)
+- [Laboratorio LXD Bridge](#-laboratorio-lxd-bridge)
+  - [Arquitectura del Laboratorio](#arquitectura-del-laboratorio)
+  - [Asignación de IPs](#asignación-de-ips)
+  - [Despliegue del Cluster](#despliegue-del-cluster)
+  - [Nodos Atacante y Víctima](#nodos-atacante-y-víctima)
+  - [Validación de Red](#validación-de-red)
+  - [Scripts de Gestión](#scripts-de-gestión)
 - [Requisitos del Sistema](#-requisitos-del-sistema)
 - [Instalación Local](#-instalación-local)
   - [Prerrequisitos](#prerrequisitos)
@@ -119,7 +126,7 @@ graph TB
 | 📊 **Observabilidad** | Prometheus, Grafana (11 dashboards), Loki, Tempo, 22 alertas de seguridad |
 | 🔄 **eBPF** | XDP, KProbes, Hot Reload, Ringbuf, CO-RE (Compile Once Run Everywhere) |
 | 💾 **Storage** | RocksDB con backups programados y retención configurable |
-| 🚀 **Deploy** | Ansible (11 playbooks), LXC containers, CI/CD Pipeline |
+| 🚀 **Deploy** | Ansible (14 playbooks), LXC containers, CI/CD Pipeline |
 
 ---
 
@@ -536,6 +543,298 @@ deployment
 
 ---
 
+## 🧪 Laboratorio LXD Bridge
+
+### Arquitectura del Laboratorio
+
+El laboratorio LXD Bridge permite ejecutar un entorno completo de nodos eBPF blockchain en máquinas virtuales ligeras (LXC containers) conectadas mediante el bridge `lxdbr1`. Todos los nodos comparten la misma subred IPv4 `192.168.2.0/24`, lo que garantiza conectividad directa entre todos los componentes.
+
+```mermaid
+graph TB
+    subgraph Host["🖥️ Host Machine"]
+        Bridge[lxdbr1: 192.168.2.1/24]
+        Docker[Docker: Prometheus :9090<br/>Grafana :3000]
+    end
+
+    subgraph Normal["🟢 Nodos Normales (Validators)"]
+        N1[ebpf-node-1<br/>192.168.2.210<br/>P2P:50000]
+        N2[ebpf-node-2<br/>192.168.2.211<br/>P2P:50001]
+        N3[ebpf-node-3<br/>192.168.2.212<br/>P2P:50002]
+    end
+
+    subgraph Victim["🔴 Nodos Víctima"]
+        V1[ebpf-victim-1<br/>192.168.2.220<br/>Seguridad reducida]
+        V2[ebpf-victim-2<br/>192.168.2.221<br/>Seguridad reducida]
+    end
+
+    subgraph Attacker["🟡 Nodos Atacante"]
+        A1[ebpf-attacker-1<br/>192.168.2.230<br/>Posición: Externa<br/>Ataques: Sybil/DDoS/Replay]
+        A2[ebpf-attacker-2<br/>192.168.2.231<br/>Posición: Interna<br/>Ataques: Eclipse/Double-vote]
+    end
+
+    Bridge --> N1 & N2 & N3 & V1 & V2 & A1 & A2
+    Docker -.scrape.-> N1 & N2 & N3 & V1 & V2 & A1 & A2
+
+    A1 -.Sybil/DDoS/Replay.-> V1
+    A2 -.Eclipse/Double-vote.-> V2
+    N1 <-->N2 & N3
+
+    style Host fill:#f5f5f5
+    style Normal fill:#e8f5e9
+    style Victim fill:#ffebee
+    style Attacker fill:#fff3e0
+    style Docker fill:#e3f2fd
+```
+
+### Asignación de IPs
+
+| Nodo | Tipo | IP | Puertos (RPC/P2P/Metrics) |
+|------|------|----|---------------------------|
+| ebpf-node-1 | Validator | 192.168.2.210 | 8080 / 50000 / 9090 |
+| ebpf-node-2 | Validator | 192.168.2.211 | 8080 / 50001 / 9090 |
+| ebpf-node-3 | Validator | 192.168.2.212 | 8080 / 50002 / 9090 |
+| ebpf-victim-1 | Víctima | 192.168.2.220 | 8080 / 50003 / 9090 |
+| ebpf-victim-2 | Víctima | 192.168.2.221 | 8080 / 50004 / 9090 |
+| ebpf-attacker-1 | Atacante (Ext) | 192.168.2.230 | 8080 / 50005 / 9090 |
+| ebpf-attacker-2 | Atacante (Int) | 192.168.2.231 | 8080 / 50006 / 9090 |
+
+**Gateway:** 192.168.2.1 | **Subnet:** 192.168.2.0/24 | **Bridge:** lxdbr1
+
+### Despliegue del Cluster
+
+#### Prerrequisitos
+
+```bash
+# Verificar que LXD está instalado
+lxc info
+
+# Verificar que el bridge existe
+lxc network show lxdbr1
+```
+
+#### Despliegue Completo con Ansible
+
+```bash
+# 1. Desplegar cluster completo (7 nodos)
+ansible-playbook ansible/playbooks/deploy_cluster.yml \
+    -i ansible/inventory/hosts.yml
+
+# 2. Desplegar solo nodos validators
+ansible-playbook ansible/playbooks/deploy.yml \
+    -i ansible/inventory/hosts.yml \
+    --limit lxc_nodes
+
+# 3. Desplegar nodos víctima
+ansible-playbook ansible/playbooks/deploy_victim.yml \
+    -i ansible/inventory/hosts.yml
+
+# 4. Desplegar nodos atacante
+ansible-playbook ansible/playbooks/deploy_attacker.yml \
+    -i ansible/inventory/hosts.yml
+```
+
+#### Despliegue con Script Bash
+
+```bash
+# Iniciar todos los nodos en el bridge
+./services/start-local-nodes.sh
+
+# Detener todos los nodos
+./services/stop-local-nodes.sh
+```
+
+El script `start-local-nodes.sh` muestra un resumen visual de todos los nodos:
+
+```
+============================================
+  eBPF Blockchain - LXD Bridge Lab
+  Network: lxdbr1 (192.168.2.0/24)
+  Gateway: 192.168.2.1
+============================================
+
+  NODE                 IP               P2P       RPC      METRICS      STATUS
+  ----                 --               ---       ---      -------      ------
+  ebpf-node-1          192.168.2.210    :50000    :8080    :9090        RUNNING
+  ebpf-node-2          192.168.2.211    :50001    :8080    :9090        RUNNING
+  ebpf-node-3          192.168.2.212    :50002    :8080    :9090        RUNNING
+  ebpf-victim-1        192.168.2.220    :50003    :8080    :9090        RUNNING
+  ebpf-victim-2        192.168.2.221    :50004    :8080    :9090        RUNNING
+  ebpf-attacker-1      192.168.2.230    :50005    :8080    :9090        RUNNING
+  ebpf-attacker-2      192.168.2.231    :50006    :8080    :9090        RUNNING
+```
+
+### Nodos Atacante y Víctima
+
+#### Configuración de Atacantes
+
+| Atacante | Posición | Ataques | Objetivo |
+|----------|----------|---------|----------|
+| ebpf-attacker-1 | Externa | Sybil, DDoS, Replay | Todos los victims |
+| ebpf-attacker-2 | Interna | Eclipse, Double-vote, Consensus Manipulation | Todos los victims |
+
+Los nodos atacante se despliegan con flags específicos:
+
+**Atacante Externo** (`attacker_flags.conf`):
+```
+--attacker
+--attack-position external
+--attack-type sybil --attack-type ddos --attack-type replay
+--target 192.168.2.220,192.168.2.221
+```
+
+**Atacante Interno** (`attacker_flags.conf`):
+```
+--attacker
+--attack-position internal
+--attack-type eclipse --attack-type double_vote --attack-type consensus_manipulation
+--target 192.168.2.220,192.168.2.221
+--simulate-internal-node
+```
+
+#### Configuración de Víctimas
+
+Los nodos víctima se despliegan con seguridad reducida para testing de ataques:
+
+**Victim Flags** (`victim_flags.conf`):
+```
+--victim
+--disable-sybil-protection
+--disable-eclipse-protection
+--disable-ddos-protection
+--disable-replay-protection
+--targeted-by "ebpf-attacker-1"
+```
+
+### Validación de Red
+
+#### Playbook de Validación de Red
+
+El playbook `validate_network.yml` verifica automáticamente las condiciones de conectividad entre atacantes y víctimas:
+
+```bash
+# Validar conectividad y logs de todos los nodos
+ansible-playbook validate_network.yml -i ansible/inventory/hosts.yml
+```
+
+**Fases de validación:**
+
+| Fase | Verificación | Descripción |
+|------|-------------|-------------|
+| 1 | Configuración de Red | IP en 192.168.2.0/24, subnet /24, gateway 192.168.2.1 |
+| 2 | Conectividad Inter-Nodo | Ping entre attacker↔victim, victim↔attacker, normal↔normal |
+| 3 | Puertos | RPC (8080), Metrics (9090), P2P (50000+) accesibles |
+| 4 | Análisis de Logs | Errores en journal, app logs, eventos de red |
+| 5 | Salud del Servicio | Estado del systemd service, uptime |
+| 6 | Reporte | Genera reporte por nodo en `/var/log/ebpf-blockchain/validations/` |
+
+#### Playbook de Validación de Laboratorio
+
+Validación completa del laboratorio incluyendo pre-flight checks:
+
+```bash
+# Validar todo el laboratorio
+ansible-playbook validate_lab.yml -i ansible/inventory/hosts.yml
+```
+
+**Verificaciones:**
+- LXD instalado y disponible
+- Bridge `lxdbr1` existe
+- Todos los contenedores existen y están RUNNING
+- Todos los nodos en subnet 192.168.2.0/24
+- Conectividad attacker↔victim
+- Reporte final generado
+
+#### Health Check Extendido
+
+```bash
+# Health check de todos los nodos (validators + attackers + victims)
+ansible-playbook health_check.yml -i ansible/inventory/hosts.yml
+```
+
+Incluye secciones para:
+- **Validators:** Service status, metrics, RPC, P2P, disk, memory, peers
+- **Attackers:** Service status, metrics, RPC endpoints
+- **Victims:** Service status, metrics, RPC endpoints
+- **Resumen Global:** Conteo de nodos por tipo, estado general
+
+### Scripts de Gestión
+
+| Script | Descripción | Uso |
+|--------|-------------|-----|
+| [`services/start-local-nodes.sh`](services/start-local-nodes.sh) | Iniciar todos los nodos en LXD bridge | `./services/start-local-nodes.sh` |
+| [`services/stop-local-nodes.sh`](services/stop-local-nodes.sh) | Detener todos los nodos | `./services/stop-local-nodes.sh` |
+| [`scripts/configure-lxd-ports.sh`](scripts/configure-lxd-ports.sh) | Exponer puertos RPC/Metrics/P2P | `./scripts/configure-lxd-ports.sh` |
+| [`scripts/live-logs.sh`](scripts/live-logs.sh) | Ver logs en tiempo real | `./scripts/live-logs.sh` |
+| [`scripts/deploy.sh`](scripts/deploy.sh) | Deploy script bash | `./scripts/deploy.sh [node_count]` |
+
+### Estructura de Archivos del Laboratorio
+
+```
+ansible/
+├── inventory/
+│   ├── hosts.yml                    # Inventario unificado IPv4
+│   └── group_vars/
+│       └── all.yml                  # Variables globales + rangos IP
+├── playbooks/
+│   ├── deploy_cluster.yml           # Despliegue cluster completo (7 nodos)
+│   ├── deploy.yml                   # Despliegue individual
+│   ├── deploy_attacker.yml          # Despliegue nodos atacante
+│   ├── deploy_victim.yml            # Despliegue nodos víctima
+│   ├── validate_network.yml         # Validación de red attacker↔victim
+│   ├── validate_lab.yml             # Validación completa del laboratorio
+│   ├── health_check.yml             # Health check extendido
+│   └── setup_ebpf_nodes.yml         # Configuración de nodos
+└── roles/
+    ├── lxc_node/                    # Roles LXC (profile, service)
+    ├── dev_environment/             # Entorno de desarrollo
+    └── monitoring/                  # Monitoring stack
+```
+
+### Configuración de Inventory
+
+```yaml
+# ansible/inventory/hosts.yml
+all:
+  children:
+    lxc_nodes:          # 3 validators
+      hosts:
+        ebpf-node-1: { ansible_host: 192.168.2.210, node_ip: 192.168.2.210 }
+        ebpf-node-2: { ansible_host: 192.168.2.211, node_ip: 192.168.2.211 }
+        ebpf-node-3: { ansible_host: 192.168.2.212, node_ip: 192.168.2.212 }
+    victim_nodes:       # 2 víctimas
+      hosts:
+        ebpf-victim-1: { ansible_host: 192.168.2.220, targeted_by: ebpf-attacker-1 }
+        ebpf-victim-2: { ansible_host: 192.168.2.221, targeted_by: ebpf-attacker-2 }
+    attacker_nodes:     # 2 atacantes
+      hosts:
+        ebpf-attacker-1: { ansible_host: 192.168.2.230, attack_position: external }
+        ebpf-attacker-2: { ansible_host: 192.168.2.231, attack_position: internal }
+```
+
+### LXC Profile
+
+```yaml
+# ansible/roles/lxc_node/templates/profile.yaml.j2
+name: ebpf-blockchain
+config:
+  limits.cpu: "2"
+  limits.memory: 4GiB
+  security.privileged: "true"
+  security.syscalls.intercept.bpf: "true"
+  security.syscalls.intercept.bpf.devices: "true"
+devices:
+  root:
+    path: /
+    pool: default
+    type: disk
+  eth0:
+    name: eth0
+    network: lxdbr1
+    type: nic
+```
+
+---
+
 ## 💻 Requisitos del Sistema
 
 ### Hardware
@@ -805,43 +1104,55 @@ echo "✅ Todos los servicios: OK"
 
 | Componente | Descripción |
 |------------|-------------|
-| [`ansible/playbooks/`](ansible/playbooks/) | 11 playbooks para despliegue y operaciones |
-| [`ansible/roles/`](ansible/roles/) | 5 roles reutilizables |
-| [`ansible/inventory/`](ansible/inventory/) | Configuración de hosts y variables |
+| [`ansible/playbooks/`](ansible/playbooks/) | 14 playbooks para despliegue, validación y operaciones |
+| [`ansible/roles/`](ansible/roles/) | 6 roles reutilizables |
+| [`ansible/inventory/`](ansible/inventory/) | Configuración de hosts y variables unificadas IPv4 |
 
 ### Playbooks Disponibles
 
 | Playbook | Descripción | Comando |
 |----------|-------------|---------|
-| `deploy.yml` | Desplegar nodo con rollback | `ansible-playbook ansible/playbooks/deploy.yml` |
-| `deploy_cluster.yml` | Desplegar cluster completo | `ansible-playbook ansible/playbooks/deploy_cluster.yml` |
+| `deploy_cluster.yml` | **Desplegar cluster completo** (7 nodos en lxdbr1) | `ansible-playbook ansible/playbooks/deploy_cluster.yml` |
+| `deploy.yml` | Desplegar nodo individual con rollback | `ansible-playbook ansible/playbooks/deploy.yml` |
+| `deploy_attacker.yml` | Desplegar nodos atacante (IPv4 unificado) | `ansible-playbook ansible/playbooks/deploy_attacker.yml` |
+| `deploy_victim.yml` | Desplegar nodos víctima (IPv4 unificado) | `ansible-playbook ansible/playbooks/deploy_victim.yml` |
+| `validate_network.yml` | **Validar conectividad attacker↔victim** | `ansible-playbook ansible/playbooks/validate_network.yml` |
+| `validate_lab.yml` | **Validar laboratorio completo** | `ansible-playbook ansible/playbooks/validate_lab.yml` |
+| `health_check.yml` | Health check extendido (todos los nodos) | `ansible-playbook ansible/playbooks/health_check.yml` |
 | `setup_ebpf_nodes.yml` | Configurar nodos eBPF | `ansible-playbook ansible/playbooks/setup_ebpf_nodes.yml` |
 | `setup_dev_environment.yml` | Configurar entorno de desarrollo | `ansible-playbook ansible/playbooks/setup_dev_environment.yml` |
 | `rollback.yml` | Rollback a versión anterior | `ansible-playbook ansible/playbooks/rollback.yml` |
-| `health_check.yml` | Verificación post-deploy | `ansible-playbook ansible/playbooks/health_check.yml` |
 | `backup.yml` | Ejecutar backup | `ansible-playbook ansible/playbooks/backup.yml` |
-| `restore.sh` | Restaurar desde backup | `ansible-playbook ansible/playbooks/restore.yml` |
+| `restore.yml` | Restaurar desde backup | `ansible-playbook ansible/playbooks/restore.yml` |
 | `disaster_recovery.yml` | Recovery completo (6 fases) | `ansible-playbook ansible/playbooks/disaster_recovery.yml` |
 | `factory_reset.yml` | Reset de fábrica | `ansible-playbook ansible/playbooks/factory_reset.yml` |
 | `fix_network.yml` | Reparar conectividad | `ansible-playbook ansible/playbooks/fix_network.yml` |
 
-### Configuración de Inventory
+### Configuración de Inventory Unificado
+
+Todos los nodos comparten la misma subred IPv4 `192.168.2.0/24`:
 
 ```yaml
 # ansible/inventory/hosts.yml
 all:
+  vars:
+    lxc_network: 192.168.2.0/24
+    lxc_gateway: 192.168.2.1
+    lxc_bridge: lxdbr1
   children:
-    ebpf_nodes:
+    lxc_nodes:          # 3 validators
       hosts:
-        ebpf-node-1:
-          ansible_host: 192.168.2.10
-          node_id: 1
-        ebpf-node-2:
-          ansible_host: 192.168.2.11
-          node_id: 2
-        ebpf-node-3:
-          ansible_host: 192.168.2.12
-          node_id: 3
+        ebpf-node-1: { ansible_host: 192.168.2.210, node_ip: 192.168.2.210 }
+        ebpf-node-2: { ansible_host: 192.168.2.211, node_ip: 192.168.2.211 }
+        ebpf-node-3: { ansible_host: 192.168.2.212, node_ip: 192.168.2.212 }
+    victim_nodes:       # 2 víctimas
+      hosts:
+        ebpf-victim-1: { ansible_host: 192.168.2.220, targeted_by: ebpf-attacker-1 }
+        ebpf-victim-2: { ansible_host: 192.168.2.221, targeted_by: ebpf-attacker-2 }
+    attacker_nodes:     # 2 atacantes
+      hosts:
+        ebpf-attacker-1: { ansible_host: 192.168.2.230, attack_position: external }
+        ebpf-attacker-2: { ansible_host: 192.168.2.231, attack_position: internal }
 ```
 
 ### Variables Principales
@@ -852,6 +1163,13 @@ project_dir: /home/maxi/Documentos/source/ebpf-blockchain
 node_working_dir: /root/ebpf-blockchain
 node_data_dir: /var/lib/ebpf-blockchain
 node_log_dir: /var/log/ebpf-blockchain
+network:
+  subnet: 192.168.2.0/24
+  gateway: 192.168.2.1
+ip_ranges:
+  nodes_start: 210
+  victims_start: 220
+  attackers_start: 230
 node_p2p_port: 50000
 node_metrics_port: 9090
 node_rpc_port: 8080
@@ -860,15 +1178,21 @@ node_rpc_port: 8080
 ### Despliegue en LXC
 
 ```bash
-# Configurar inventory
-cp ansible/inventory/hosts.yml.example ansible/inventory/hosts.yml
-# Editar con IPs reales
+# 1. Desplegar cluster completo (7 nodos en lxdbr1)
+ansible-playbook ansible/playbooks/deploy_cluster.yml \
+    -i ansible/inventory/hosts.yml
 
-# Desplegar cluster
-ansible-playbook ansible/playbooks/deploy_cluster.yml -i ansible/inventory/hosts.yml
+# 2. Validar laboratorio
+ansible-playbook ansible/playbooks/validate_lab.yml \
+    -i ansible/inventory/hosts.yml
 
-# Verificar health
-ansible-playbook ansible/playbooks/health_check.yml -i ansible/inventory/hosts.yml
+# 3. Verificar health
+ansible-playbook ansible/playbooks/health_check.yml \
+    -i ansible/inventory/hosts.yml
+
+# 4. Validar red attacker↔victim
+ansible-playbook ansible/playbooks/validate_network.yml \
+    -i ansible/inventory/hosts.yml
 ```
 
 ---
@@ -1011,6 +1335,10 @@ ansible-playbook ansible/playbooks/health_check.yml -i ansible/inventory/hosts.y
 | Consenso no avanza | Quorum no alcanzado | Verificar que 2/3 de validadores estén activos |
 | Docker compose falla | Versión incompatible | Actualizar Docker Compose a 2.0+ |
 | Logs no llegan a Loki | Promtail no corre | Verificar `docker compose ps` y logs de promtail |
+| Bridge lxdbr1 no existe | LXD no configurado | `lxc network create lxdbr1 ipv4.address=192.168.2.1/24 ipv4.nat=true` |
+| Contenedor no arranca | Memoria insuficiente | Verificar `lxc config set <container> limits.memory 4GiB` |
+| Attacker no pinguea victim | Red no unificada | Ejecutar `ansible-playbook validate_network.yml` para diagnosticar |
+| Nodo no accesible por LAN | Puerto no expuesto | `./scripts/configure-lxd-ports.sh` para exponer RPC/Metrics/P2P |
 
 ### Comandos de Diagnóstico
 
@@ -1147,6 +1475,7 @@ eBPF programs must comply with the GPL-2.0 terms.
 | OpenAPI Specification | [`docs/openapi.yml`](docs/openapi.yml) |
 | Análisis Integral | [`docs/COMPREHENSIVE-PROJECT-ANALYSIS.md`](docs/COMPREHENSIVE-PROJECT-ANALYSIS.md) |
 | Auditoría de Arquitectura | [`docs/ARCHITECTURE-AUDIT-REPORT.md`](docs/ARCHITECTURE-AUDIT-REPORT.md) |
+| Plan Laboratorio LXD Bridge | [`plans/local-lab-lxdbr1-network-validation.md`](plans/local-lab-lxdbr1-network-validation.md) |
 | Documentación Archivada | [`archive/README.md`](archive/README.md) |
 
 ---
