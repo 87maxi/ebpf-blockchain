@@ -1,0 +1,175 @@
+---
+# =============================================================================
+# Deploy eBPF Victim Node - Unified IPv4
+# Descripción: Despliega el binario ebpf-node en nodos víctima con
+#              configuración reducida de seguridad para testing de ataques.
+# Uso: ansible-playbook deploy_victim.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: Deploy eBPF Victim Nodes
+  hosts: victim_nodes
+  become: yes
+  gather_facts: yes
+  any_errors_fatal: true
+
+  vars:
+    ebpf_node_dir: "{{ node_working_dir | default('/root/ebpf-blockchain') }}"
+    ebpf_node_bin: "{{ node_binary_dir | default('/root/.cargo/bin') }}/ebpf-node"
+    ebpf_data_dir: "{{ node_data_dir | default('/var/lib/ebpf-blockchain') }}"
+    ebpf_log_dir: "{{ node_log_dir | default('/var/log/ebpf-blockchain') }}"
+    node_interface: "{{ node_interface | default('eth0') }}"
+    victim_mode: true
+    deployment_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+  pre_tasks:
+    - name: Create log directory
+      file:
+        path: "{{ ebpf_log_dir }}"
+        state: directory
+        mode: "0755"
+      tags: [deploy, logging]
+
+    - name: Verify connectivity
+      ping:
+      tags: [check, deploy]
+
+  tasks:
+    # ---- Environment Setup ----
+    - name: Create eBPF directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ebpf_data_dir }}"
+        - "{{ ebpf_log_dir }}"
+        - "{{ ebpf_log_dir }}/backups"
+        - "/var/log/ebpf-blockchain"
+      tags: [deploy, directories]
+
+    # ---- Build from Source ----
+    - name: Check if binary exists
+      stat:
+        path: "{{ ebpf_node_bin }}"
+      register: binary_stat
+      tags: [deploy, build]
+
+    - name: Build eBPF node binary
+      when: not binary_stat.stat.exists
+      block:
+        - name: Clone or update repository
+          git:
+            repo: "{{ project_git_url | default('https://github.com/example/ebpf-blockchain.git') }}"
+            dest: "{{ ebpf_node_dir }}"
+            version: "{{ deployment_version | default('main') }}"
+            force: true
+          tags: [deploy, build]
+
+        - name: Build eBPF node
+          command: cargo build --release
+          args:
+            chdir: "{{ ebpf_node_dir }}/ebpf-node"
+          environment:
+            RUST_LOG: info
+          tags: [deploy, build]
+      rescue:
+        - name: Log build failure
+          copy:
+            content: "{{ deployment_timestamp }} BUILD FAILED on {{ inventory_hostname }}\n"
+            dest: "{{ ebpf_log_dir }}/build_error.log"
+            mode: "0644"
+
+    # ---- Configure IPv4 Network ----
+    - name: Configure IPv4 network settings
+      block:
+        - name: Set node IP from inventory
+          set_fact:
+            victim_node_ip: "{{ hostvars[inventory_hostname].node_ip }}"
+          tags: [deploy, network]
+
+        - name: Verify IP is in correct subnet
+          assert:
+            that:
+              - "'192.168.2.' in hostvars[inventory_hostname].node_ip"
+            fail_msg: "Victim {{ inventory_hostname }} IP {{ hostvars[inventory_hostname].node_ip }} is not in 192.168.2.0/24"
+          tags: [deploy, network, validate]
+
+      tags: [deploy, network]
+
+    # ---- Deploy Systemd Service ----
+    - name: Copy victim service unit file
+      template:
+        src: "../roles/lxc_node/templates/ebpf-blockchain.service.j2"
+        dest: "/etc/systemd/system/ebpf-victim.service"
+        mode: "0644"
+      vars:
+        # Override variables for victim mode
+        node_working_dir: "{{ ebpf_node_dir }}"
+        node_binary_dir: "{{ node_binary_dir | default('/root/.cargo/bin') }}"
+        node_interface: "{{ node_interface }}"
+        node_rpc_port: "{{ node_rpc_port | default(8080) }}"
+        node_p2p_port: "{{ node_p2p_port | default(50003) }}"
+        node_metrics_port: "{{ node_metrics_port | default(9090) }}"
+        bootnodes: "{{ bootnodes | default('') }}"
+        node_id: "{{ node_name }}"
+        validator_mode: "false"
+      notify: Restart ebpf-victim service
+      tags: [deploy, service]
+
+    - name: Copy victim-specific flags file
+      copy:
+        content: |
+          # Victim mode flags - Reduced security for attack testing
+          # Targeted by: {{ hostvars[inventory_hostname].targeted_by | default('unknown') }}
+          --victim
+          --disable-sybil-protection
+          --disable-eclipse-protection
+          --disable-ddos-protection
+          --disable-replay-protection
+          --targeted-by "{{ hostvars[inventory_hostname].targeted_by | default('unknown') }}"
+        dest: "{{ ebpf_data_dir }}/victim_flags.conf"
+        mode: "0644"
+      tags: [deploy, service, victim]
+
+    # ---- Enable and Start Service ----
+    - name: Enable ebpf-victim service
+      systemd:
+        name: ebpf-victim
+        enabled: true
+        daemon_reload: true
+      tags: [deploy, service]
+
+    - name: Start ebpf-victim service
+      systemd:
+        name: ebpf-victim
+        state: started
+      tags: [deploy, service]
+
+    - name: Wait for metrics port to be available
+      wait_for:
+        port: "{{ node_metrics_port | default(9090) }}"
+        host: "{{ hostvars[inventory_hostname].node_ip }}"
+        timeout: 30
+      ignore_errors: true
+      tags: [deploy, verify]
+
+    - name: Display deployment status
+      debug:
+        msg: |
+          ========================================
+          Victim Node Deployed: {{ inventory_hostname }}
+          ========================================
+          Node IP:     {{ hostvars[inventory_hostname].node_ip }}
+          Node Name:   {{ hostvars[inventory_hostname].node_name }}
+          Targeted By: {{ hostvars[inventory_hostname].targeted_by | default('unknown') }}
+          Service:     ebpf-victim
+          Metrics:     http://{{ hostvars[inventory_hostname].node_ip }}:{{ node_metrics_port | default(9090) }}/metrics
+          ========================================
+      tags: [deploy, verify]
+
+  handlers:
+    - name: Restart ebpf-victim service
+      systemd:
+        name: ebpf-victim
+        state: restarted
+        daemon_reload: true

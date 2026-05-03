@@ -1,5 +1,5 @@
 ---
-- name: eBPF Cluster Setup
+- name: eBPF Cluster Setup - Unified IPv4 Lab
   hosts: localhost
   connection: local
   gather_facts: false
@@ -8,15 +8,17 @@
   vars:
     num_nodes: 3
     base_ip: "192.168.2"
-    start_ip: 10
+    gateway: "192.168.2.1"
+    start_ip: 210
     project_dir: /home/maxi/Documentos/source/ebpf-blockchain
+    lxc_bridge: lxdbr1
 
   tasks:
     # ---- Network Setup ----
     - name: Ensure lxdbr1 network exists
       shell: |
-        if ! lxc network show lxdbr1 >/dev/null 2>&1; then
-          lxc network create lxdbr1 ipv4.address={{ base_ip }}.1/24 ipv4.nat=true ipv6.address=none
+        if ! lxc network show {{ lxc_bridge }} >/dev/null 2>&1; then
+          lxc network create {{ lxc_bridge }} ipv4.address={{ base_ip }}.1/24 ipv4.nat=true ipv6.address=none
         fi
       tags: [cluster, network, deploy]
 
@@ -32,8 +34,8 @@
     - name: Allow forwarding for lxdbr1 bridge
       iptables:
         chain: FORWARD
-        in_interface: lxdbr1
-        out_interface: lxdbr1
+        in_interface: "{{ lxc_bridge }}"
+        out_interface: "{{ lxc_bridge }}"
         jump: ACCEPT
       become: true
       tags: [cluster, network, deploy]
@@ -49,12 +51,12 @@
       iptables:
         chain: INPUT
         protocol: tcp
-        destination_port: 50000
+        destination_port: "50000:50010"
         jump: ACCEPT
       become: true
       tags: [cluster, network, deploy]
 
-    # ---- LXC Node Creation ----
+    # ---- LXC Node Creation - Normal Nodes ----
     - name: Launch LXC nodes
       shell: |
         if ! lxc info ebpf-node-{{ item }} >/dev/null 2>&1; then
@@ -63,81 +65,204 @@
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, nodes, deploy]
 
-    - name: Wait for nodes
+    # ---- LXC Node Creation - Victim Nodes ----
+    - name: Launch Victim nodes
+      shell: |
+        if ! lxc info ebpf-victim-{{ item }} >/dev/null 2>&1; then
+          lxc launch ubuntu:24.04 ebpf-victim-{{ item }} -p ebpf-blockchain
+        fi
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, nodes, victim, deploy]
+
+    # ---- LXC Node Creation - Attacker Nodes (both) ----
+    - name: Launch Attacker-1 node
+      shell: |
+        if ! lxc info ebpf-attacker-1 >/dev/null 2>&1; then
+          lxc launch ubuntu:24.04 ebpf-attacker-1 -p ebpf-blockchain
+        fi
+      tags: [cluster, nodes, attacker, deploy]
+
+    - name: Launch Attacker-2 node
+      shell: |
+        if ! lxc info ebpf-attacker-2 >/dev/null 2>&1; then
+          lxc launch ubuntu:24.04 ebpf-attacker-2 -p ebpf-blockchain
+        fi
+      tags: [cluster, nodes, attacker, deploy]
+
+    - name: Wait for all nodes to boot
       pause:
-        seconds: 25
+        seconds: 30
       tags: [cluster, nodes, deploy]
 
-    - name: Set LXC limits for eBPF
+    # ---- LXC Configuration ----
+    - name: Set LXC limits for eBPF nodes
       shell: |
         lxc config set ebpf-node-{{ item }} limits.memory.swap false
         lxc config set ebpf-node-{{ item }} security.privileged true
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, nodes, config]
 
-    - name: Freeze DNS configuration
+    - name: Set LXC limits for Victim nodes
       shell: |
-        lxc exec ebpf-node-{{ item }} -- bash -c "
+        lxc config set ebpf-victim-{{ item }} limits.memory.swap false
+        lxc config set ebpf-victim-{{ item }} security.privileged true
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, nodes, victim, config]
+
+    - name: Set LXC limits for Attacker nodes
+      shell: |
+        lxc config set ebpf-attacker-{{ item }} limits.memory.swap false
+        lxc config set ebpf-attacker-{{ item }} security.privileged true
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, nodes, attacker, config]
+
+    - name: Freeze DNS configuration for all nodes
+      shell: |
+        lxc exec {%- for i in range(1, num_nodes | int + 1) %}ebpf-node-{{ i }} {% endfor %}{%- for i in range(1, 3) %}ebpf-victim-{{ i }} {% endfor %}{%- for i in range(1, 3) %}ebpf-attacker-{{ i }} {% endfor %}-- bash -c "
           rm -f /etc/resolv.conf && \
           echo 'nameserver 8.8.8.8' > /etc/resolv.conf && \
-          chattr +i /etc/resolv.conf
+          echo 'nameserver 8.8.4.4' >> /etc/resolv.conf && \
+          chattr +i /etc/resolv.conf 2>/dev/null || true
         "
-      loop: "{{ range(1, num_nodes | int + 1) | list }}"
       ignore_errors: true
-      tags: [cluster, nodes, config]
+      tags: [cluster, nodes, config, dns]
 
-    # ---- Network Configuration ----
-    - name: Configure network for each node (Fixing Gateway to 192.168.2.1)
+    # ---- Network Configuration - Unified IPv4 for ALL nodes ----
+    - name: Configure network for eBPF nodes (IPv4)
       shell: |
-        IP="{{ base_ip }}.$(({{ start_ip }} + {{ item }}))"
-        GATEWAY="{{ base_ip }}.1"
+        IP="{{ base_ip }}.{{ start_ip + item }}"
+        GATEWAY="{{ gateway }}"
         lxc exec ebpf-node-{{ item }} -- bash -c "
           cat <<EOF > /etc/netplan/10-lxc.yaml
-        network:
-          version: 2
-          ethernets:
-            eth0:
-              dhcp4: no
-              addresses: [$IP/24]
-              routes:
-                - to: default
-                  via: $GATEWAY
-              nameservers:
-                addresses: [8.8.8.8, 1.1.1.1]
-        EOF
-          # Aplicación manual para bypass de udev
-          ip addr add $IP/24 dev eth0 || true
-          ip route add default via $GATEWAY dev eth0 || true
-
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                dhcp4: no
+                addresses: [\$IP/24]
+                routes:
+                  - to: default
+                    via: \$GATEWAY
+                nameservers:
+                  addresses: [8.8.8.8, 8.8.4.4]
+          EOF
+          ip addr flush dev eth0 2>/dev/null || true
+          ip addr add \$IP/24 dev eth0 || true
+          ip route del default 2>/dev/null || true
+          ip route add default via \$GATEWAY dev eth0 || true
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, network, config]
 
+    - name: Configure network for Victim nodes (IPv4)
+      shell: |
+        IP="{{ base_ip }}.{{ 220 + item }}"
+        GATEWAY="{{ gateway }}"
+        lxc exec ebpf-victim-{{ item }} -- bash -c "
+          cat <<EOF > /etc/netplan/10-lxc.yaml
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                dhcp4: no
+                addresses: [\$IP/24]
+                routes:
+                  - to: default
+                    via: \$GATEWAY
+                nameservers:
+                  addresses: [8.8.8.8, 8.8.4.4]
+          EOF
+          ip addr flush dev eth0 2>/dev/null || true
+          ip addr add \$IP/24 dev eth0 || true
+          ip route del default 2>/dev/null || true
+          ip route add default via \$GATEWAY dev eth0 || true
+        "
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, network, config, victim]
+
+    - name: Configure network for Attacker nodes (IPv4)
+      shell: |
+        IP="{{ base_ip }}.{{ 230 + item }}"
+        GATEWAY="{{ gateway }}"
+        lxc exec ebpf-attacker-{{ item }} -- bash -c "
+          cat <<EOF > /etc/netplan/10-lxc.yaml
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                dhcp4: no
+                addresses: [\$IP/24]
+                routes:
+                  - to: default
+                    via: \$GATEWAY
+                nameservers:
+                  addresses: [8.8.8.8, 8.8.4.4]
+          EOF
+          ip addr flush dev eth0 2>/dev/null || true
+          ip addr add \$IP/24 dev eth0 || true
+          ip route del default 2>/dev/null || true
+          ip route add default via \$GATEWAY dev eth0 || true
+        "
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, network, config, attacker]
+
     # ---- Dependencies Installation ----
-    - name: Install system deps + eBPF debug tools
+    - name: Install system deps + eBPF debug tools on all nodes
       shell: |
         lxc exec ebpf-node-{{ item }} -- bash -c "
-          # 1. Forzar DNS y Ruta por si falló lo anterior
-          ip route add default via 192.168.2.1 dev eth0 || true
-
-          # 2. Actualizar e Instalar con sintaxis correcta (uso de \)
           DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             build-essential clang llvm libelf-dev libbpf-dev curl git make \
             bpfcc-tools bpftrace linux-tools-generic \
-              netperf iperf3 tcpdump wireshark-common strace ltrace gdb \
+            netperf iperf3 tcpdump wireshark-common strace ltrace gdb \
             python3 python3-pip pahole rocksdb-tools
         "
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, dependencies, install]
 
-    - name: Install Rust
+    - name: Install system deps on victim nodes
+      shell: |
+        lxc exec ebpf-victim-{{ item }} -- bash -c "
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential clang llvm libelf-dev libbpf-dev curl git make \
+            bpfcc-tools bpftrace linux-tools-generic \
+            python3 python3-pip
+        "
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, dependencies, install, victim]
+
+    - name: Install system deps on attacker nodes
+      shell: |
+        lxc exec ebpf-attacker-{{ item }} -- bash -c "
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential clang llvm libelf-dev libbpf-dev curl git make \
+            bpfcc-tools bpftrace linux-tools-generic \
+            python3 python3-pip nmap tcpdump wireshark-common
+        "
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, dependencies, install, attacker]
+
+    - name: Install Rust on all nodes
       shell: |
         lxc exec ebpf-node-{{ item }} -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, dependencies, rust, install]
 
-    - name: Install Rust nightly
+    - name: Install Rust on victim nodes
+      shell: |
+        lxc exec ebpf-victim-{{ item }} -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, dependencies, rust, install, victim]
+
+    - name: Install Rust on attacker nodes
+      shell: |
+        lxc exec ebpf-attacker-{{ item }} -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, dependencies, rust, install, attacker]
+
+    - name: Install Rust nightly toolchain
       ansible.builtin.shell: |
         lxc exec ebpf-node-{{ item }} -- bash -c "source /root/.cargo/env && rustup toolchain install nightly --component rust-src && rustup default nightly"
         lxc exec ebpf-node-{{ item }} -- bash -c "source /root/.cargo/env && cargo install bpf-linker"
@@ -150,11 +275,23 @@
       tags: [cluster, dependencies, rust, install]
 
     # ---- Project Setup ----
-    - name: Mount project
+    - name: Mount project to eBPF nodes
       shell: |
         lxc config device add ebpf-node-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
       loop: "{{ range(1, num_nodes | int + 1) | list }}"
       tags: [cluster, mount, deploy]
+
+    - name: Mount project to victim nodes
+      shell: |
+        lxc config device add ebpf-victim-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, mount, deploy, victim]
+
+    - name: Mount project to attacker nodes
+      shell: |
+        lxc config device add ebpf-attacker-{{ item }} workspace disk source={{ project_dir }} path=/root/ebpf-blockchain || true
+      loop: "{{ range(1, 3) | list }}"
+      tags: [cluster, mount, deploy, attacker]
 
     - name: Configure RocksDB inspection alias
       shell: |
@@ -175,18 +312,24 @@
         lxc exec ebpf-node-1 -- bash -c "source /root/.cargo/env && cd /root/ebpf-blockchain/ebpf-node && cargo build --release"
       tags: [cluster, build, deploy]
 
+    - name: Copy binary to other nodes
+      shell: |
+        lxc file push {{ project_dir }}/ebpf-node/target/release/ebpf-node ebpf-node-{{ item }}/root/ebpf-blockchain/ebpf-node/target/release/ebpf-node
+      loop: "{{ range(2, num_nodes | int + 1) | list }}"
+      tags: [cluster, build, deploy]
+
     - name: Start node 1 and get Peer ID
       shell: |
         nohup lxc exec ebpf-node-1 -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1'" > /tmp/ebpf-node-1.log 2>&1 &
         sleep 5
-        lxc exec ebpf-node-1 -- cat /tmp/peer_id.txt | tr -d '\r\n'
+        cat /tmp/peer_id.txt 2>/dev/null | tr -d '\r\n' || echo "pending"
       register: node1_peer_id
       tags: [cluster, nodes, start]
 
     - name: Start remaining P2P nodes
       shell: |
-        IP1="{{ base_ip }}.$(({{ start_ip }} + 1))"
-        nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/50000,/ip4/0.0.0.0/udp/50000/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}'" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
+        IP1="{{ base_ip }}.{{ start_ip + 1 }}"
+        nohup lxc exec ebpf-node-{{ item }} -- bash -c "cd /root/ebpf-blockchain/ebpf-node && source /root/.cargo/env && ./target/release/ebpf-node --iface eth0 --listen-addresses '/ip4/0.0.0.0/tcp/5000{{ item }},/ip4/0.0.0.0/udp/5000{{ item }}/quic-v1' --bootstrap-peers '/ip4/$IP1/tcp/50000/p2p/{{ node1_peer_id.stdout }}'" > /tmp/ebpf-node-{{ item }}.log 2>&1 &
       loop: "{{ range(2, num_nodes | int + 1) | list }}"
       tags: [cluster, nodes, start, p2p]
 
@@ -205,5 +348,11 @@
 
     - name: Show result
       debug:
-        msg: "Cluster ready! Nodes: {{ num_nodes }} | Grafana: http://localhost:3000 | Prometheus: http://localhost:9090 | Logs: lxc exec ebpf-node-1 -- tail -f /tmp/ebpf.log"
-      tags: [cluster, summary]
+        msg: |
+          Cluster ready!
+          Nodes: {{ num_nodes }} normal + 2 victim + 2 attacker
+          Gateway: {{ gateway }}
+          Subnet: {{ base_ip }}.0/24
+          Grafana: http://localhost:3000
+          Prometheus: http://localhost:9090
+          Logs: lxc exec ebpf-node-1 -- tail -f /tmp/ebpf-node-1.log

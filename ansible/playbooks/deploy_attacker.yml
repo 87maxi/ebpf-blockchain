@@ -1,0 +1,242 @@
+---
+# =============================================================================
+# Deploy eBPF Attacker Node - Unified IPv4
+# Descripción: Despliega el binario ebpf-node en el nodo attacker con
+#              configuración de atacante (flags específicos) y red IPv4.
+# Uso: ansible-playbook deploy_attacker.yml -i inventory/hosts.yml
+# =============================================================================
+
+- name: Deploy eBPF Attacker Node
+  hosts: attacker_nodes
+  become: yes
+  gather_facts: yes
+  any_errors_fatal: true
+
+  vars:
+    ebpf_node_dir: "{{ node_working_dir | default('/root/ebpf-blockchain') }}"
+    ebpf_node_bin: "{{ node_binary_dir | default('/root/.cargo/bin') }}/ebpf-node"
+    ebpf_data_dir: "{{ node_data_dir | default('/var/lib/ebpf-blockchain') }}"
+    ebpf_log_dir: "{{ node_log_dir | default('/var/log/ebpf-blockchain') }}"
+    node_interface: "{{ node_interface | default('eth0') }}"
+    attacker_mode: true
+    deployment_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+  pre_tasks:
+    - name: Create log directory
+      file:
+        path: "{{ ebpf_log_dir }}"
+        state: directory
+        mode: "0755"
+      tags: [deploy, logging]
+
+    - name: Verify connectivity
+      ping:
+      tags: [check, deploy]
+
+  tasks:
+    # ---- Environment Setup ----
+    - name: Create eBPF directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ebpf_data_dir }}"
+        - "{{ ebpf_log_dir }}"
+        - "{{ ebpf_log_dir }}/backups"
+        - "/var/log/ebpf-blockchain"
+      tags: [deploy, directories]
+
+    # ---- Build from Source ----
+    - name: Check if binary exists
+      stat:
+        path: "{{ ebpf_node_bin }}"
+      register: binary_stat
+      tags: [deploy, build]
+
+    - name: Build eBPF node binary
+      when: not binary_stat.stat.exists
+      block:
+        - name: Clone or update repository
+          git:
+            repo: "{{ project_git_url | default('https://github.com/example/ebpf-blockchain.git') }}"
+            dest: "{{ ebpf_node_dir }}"
+            version: "{{ deployment_version | default('main') }}"
+            force: true
+          tags: [deploy, build]
+
+        - name: Build eBPF node
+          command: cargo build --release
+          args:
+            chdir: "{{ ebpf_node_dir }}/ebpf-node"
+          environment:
+            RUST_LOG: info
+          tags: [deploy, build]
+      rescue:
+        - name: Log build failure
+          copy:
+            content: "{{ deployment_timestamp }} BUILD FAILED on {{ inventory_hostname }}\n"
+            dest: "{{ ebpf_log_dir }}/build_error.log"
+            mode: "0644"
+
+    # ---- Configure IPv4 Network ----
+    - name: Configure IPv4 network settings
+      block:
+        - name: Set node IP from inventory
+          set_fact:
+            attacker_node_ip: "{{ hostvars[inventory_hostname].node_ip }}"
+          tags: [deploy, network]
+
+        - name: Verify IP is in correct subnet
+          assert:
+            that:
+              - "'192.168.2.' in hostvars[inventory_hostname].node_ip"
+            fail_msg: "Attacker {{ inventory_hostname }} IP {{ hostvars[inventory_hostname].node_ip }} is not in 192.168.2.0/24"
+          tags: [deploy, network, validate]
+
+      tags: [deploy, network]
+
+    # ---- Deploy Systemd Service ----
+    - name: Determine attack position
+      set_fact:
+        _attack_position: "{{ hostvars[inventory_hostname].attack_position | default('external') }}"
+      tags: [deploy, service]
+
+    - name: Determine victim targets based on attack position
+      set_fact:
+        _victim_targets: >-
+          {{
+            (groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | list)
+            if _attack_position == 'external'
+            else
+            (hostvars[inventory_hostname].target_victim | default(hostvars[groups['victim_nodes'][0]].node_ip) | list)
+          }}
+      tags: [deploy, service]
+
+    - name: Copy attacker service unit file (External Attacker)
+      when: _attack_position == 'external'
+      template:
+        src: "../roles/lxc_node/templates/ebpf-blockchain.service.j2"
+        dest: "/etc/systemd/system/ebpf-attacker.service"
+        mode: "0644"
+      vars:
+        node_working_dir: "{{ ebpf_node_dir }}"
+        node_binary_dir: "{{ node_binary_dir | default('/root/.cargo/bin') }}"
+        node_interface: "{{ node_interface }}"
+        node_rpc_port: "{{ node_rpc_port | default(8080) }}"
+        node_p2p_port: "{{ node_p2p_port | default(50005) }}"
+        node_metrics_port: "{{ node_metrics_port | default(9090) }}"
+        bootnodes: "{{ bootnodes | default('') }}"
+        node_id: "{{ node_name }}"
+        validator_mode: "false"
+      notify: Restart ebpf-attacker service
+      tags: [deploy, service, external]
+
+    - name: Copy attacker service unit file (Internal Attacker)
+      when: _attack_position == 'internal'
+      template:
+        src: "../roles/lxc_node/templates/ebpf-blockchain.service.j2"
+        dest: "/etc/systemd/system/ebpf-attacker.service"
+        mode: "0644"
+      vars:
+        node_working_dir: "{{ ebpf_node_dir }}"
+        node_binary_dir: "{{ node_binary_dir | default('/root/.cargo/bin') }}"
+        node_interface: "{{ node_interface }}"
+        node_rpc_port: "{{ node_rpc_port | default(8080) }}"
+        node_p2p_port: "{{ node_p2p_port | default(50006) }}"
+        node_metrics_port: "{{ node_metrics_port | default(9090) }}"
+        bootnodes: "{{ bootnodes | default('') }}"
+        node_id: "{{ node_name }}"
+        validator_mode: "true"
+      notify: Restart ebpf-attacker service
+      tags: [deploy, service, internal]
+
+    - name: Set attack types for external attacker
+      when: _attack_position == 'external'
+      set_fact:
+        _attack_types_list: "{{ hostvars[inventory_hostname].attack_types | default(['sybil', 'ddos', 'replay']) }}"
+        _victim_target_ips: "{{ groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | join(',') }}"
+      tags: [deploy, service, attacker, external]
+
+    - name: Copy attacker-specific flags file (External - Sybil/DDoS/Replay)
+      when: _attack_position == 'external'
+      copy:
+        content: |
+          # Attacker mode flags - External Position
+          # Attack Types: {{ _attack_types_list | join(', ') }}
+          # Target: {{ _victim_target_ips }}
+          --attacker
+          --attack-position external
+          --attack-type {{ _attack_types_list | join(' --attack-type ') }}
+          --target {{ _victim_target_ips }}
+        dest: "{{ ebpf_data_dir }}/attacker_flags.conf"
+        mode: "0644"
+      tags: [deploy, service, attacker, external]
+
+    - name: Set attack types for internal attacker
+      when: _attack_position == 'internal'
+      set_fact:
+        _attack_types_list: "{{ hostvars[inventory_hostname].attack_types | default(['eclipse', 'double_vote', 'consensus_manipulation']) }}"
+        _victim_target_ips: "{{ groups['victim_nodes'] | map('extract', hostvars) | map(attribute='node_ip') | join(',') }}"
+      tags: [deploy, service, attacker, internal]
+
+    - name: Copy attacker-specific flags file (Internal - Eclipse/Double-vote/Consensus)
+      when: _attack_position == 'internal'
+      copy:
+        content: |
+          # Attacker mode flags - Internal Position (Simulated insider threat)
+          # Attack Types: {{ _attack_types_list | join(', ') }}
+          # Target: {{ _victim_target_ips }}
+          --attacker
+          --attack-position internal
+          --attack-type {{ _attack_types_list | join(' --attack-type ') }}
+          --target {{ _victim_target_ips }}
+          --simulate-internal-node
+        dest: "{{ ebpf_data_dir }}/attacker_flags.conf"
+        mode: "0644"
+      tags: [deploy, service, attacker, internal]
+
+    # ---- Enable and Start Service ----
+    - name: Enable ebpf-attacker service
+      systemd:
+        name: ebpf-attacker
+        enabled: true
+        daemon_reload: true
+      tags: [deploy, service]
+
+    - name: Start ebpf-attacker service
+      systemd:
+        name: ebpf-attacker
+        state: started
+      tags: [deploy, service]
+
+    - name: Wait for metrics port to be available
+      wait_for:
+        port: "{{ node_metrics_port | default(9090) }}"
+        host: "{{ hostvars[inventory_hostname].node_ip }}"
+        timeout: 30
+      ignore_errors: true
+      tags: [deploy, verify]
+
+    - name: Display deployment status
+      debug:
+        msg: |
+          ========================================
+          Attacker Node Deployed: {{ inventory_hostname }}
+          ========================================
+          Node IP:     {{ hostvars[inventory_hostname].node_ip }}
+          Node Name:   {{ hostvars[inventory_hostname].node_name }}
+          Position:    {{ _attack_position | default('unknown') }}
+          Attack Types: {{ _attack_types_list | default('unknown') | join(', ') }}
+          Targets:     {{ _victim_target_ips | default('unknown') }}
+          Service:     ebpf-attacker
+          Metrics:     http://{{ hostvars[inventory_hostname].node_ip }}:{{ node_metrics_port | default(9090) }}/metrics
+          ========================================
+      tags: [deploy, verify]
+
+  handlers:
+    - name: Restart ebpf-attacker service
+      systemd:
+        name: ebpf-attacker
+        state: restarted
+        daemon_reload: true
