@@ -82,3 +82,47 @@ scrape_configs:
         labels:
           group: 'ebpf-cluster'
           service: 'block-generator'
+
+  # Attacker Node metrics
+  - job_name: 'ebpf-attacker-1'
+    static_configs:
+      - targets:
+          - 'fd42:cb45:3f5b:661:216:3eff:fe72:5c21:9090'
+        labels:
+          group: 'attack-surface'
+          node: 'attacker-1'
+          node_type: 'attacker'
+          attack_position: 'external'
+          attack_types: 'sybil,ddos,replay'
+
+  - job_name: 'ebpf-attacker-2'
+    static_configs:
+      - targets:
+          - 'fd42:cb45:3f5b:661:216:3eff:fe72:5c22:9090'
+        labels:
+          group: 'attack-surface'
+          node: 'attacker-2'
+          node_type: 'attacker'
+          attack_position: 'internal'
+          attack_types: 'eclipse,double_vote,consensus_manipulation'
+
+  # Victim Node metrics
+  - job_name: 'ebpf-victim-1'
+    static_configs:
+      - targets:
+          - 'fd42:cb45:3f5b:661:216:3eff:fe72:5c31:9090'
+        labels:
+          group: 'attack-targets'
+          node: 'victim-1'
+          node_type: 'victim'
+          targeted_by: 'ebpf-attacker-1'
+
+  - job_name: 'ebpf-victim-2'
+    static_configs:
+      - targets:
+          - 'fd42:cb45:3f5b:661:216:3eff:fe72:5c32:9090'
+        labels:
+          group: 'attack-targets'
+          node: 'victim-2'
+          node_type: 'victim'
+          targeted_by: 'ebpf-attacker-2'
