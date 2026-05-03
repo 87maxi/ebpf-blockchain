@@ -21,7 +21,7 @@ node_binary_dir: "{{ node_working_dir }}/ebpf-node/target/release"
 node_binary_name: ebpf-node
 
 # =============================================================================
-# TAREA 4.2: Node ports (RPC port changed from 3000 to 8080 to avoid Grafana conflict)
+# TAREA 4.2: Unified ports (RPC: 8080, Metrics: 9090, P2P: 50000+)
 # =============================================================================
 # Node ports
 node_metrics_port: 9090
@@ -50,19 +50,33 @@ lxc_defaults:
   memory_limit: 4GiB
   network_bridge: lxdbr1
 
-# Network configuration
+# =============================================================================
+# Network configuration - UNIFIED IPv4
+# =============================================================================
 network:
   subnet: 192.168.2.0/24
-  gateway: 192.168.2.200
+  gateway: 192.168.2.1
   nameservers:
     - 8.8.8.8
     - 8.8.4.4
+
+# IP assignment ranges for lab nodes
+ip_ranges:
+  nodes_start: 210
+  nodes_end: 212
+  victims_start: 220
+  victims_end: 221
+  attackers_start: 230
+  attackers_end: 231
 
 # Node defaults
 node_defaults:
   user: root
   home: /root
   rust_version: nightly
+  p2p_port_start: 50000
+  rpc_port: 8080
+  metrics_port: 9090
 
 # Monitoring ports
 prometheus_port: 9090
