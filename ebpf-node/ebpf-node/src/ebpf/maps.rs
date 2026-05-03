@@ -88,6 +88,29 @@ impl<'a> EbpfMaps<'a> {
 
     /// Get total packets processed (from XDP metrics)
     pub fn total_packets_processed(&self) -> i64 {
+        let stats = match self.latency_stats() {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let total: u64 = stats.iter()
+            .filter_map(|entry| entry.ok().map(|(_, v)| v))
+            .sum();
+        total as i64
+    }
+
+    /// Get dropped packets count from XDP_DROP_COUNT map
+    pub fn dropped_packets_count(&self) -> i64 {
+        // Try to read from DROPPED_PACKETS map if it exists
+        if let Some(map) = self.ebpf.map("DROPPED_PACKETS") {
+            if let Ok(drop_map) = HashMap::<_, u32, u64>::try_from(map) {
+                let total: u64 = drop_map.iter()
+                    .filter_map(|entry| entry.ok().map(|(_, v)| v))
+                    .sum();
+                return total as i64;
+            }
+        }
+        // Fallback: estimate from blacklist size as proxy for drops
+        // In production, the eBPF program should maintain a drop counter
         0
     }
 }

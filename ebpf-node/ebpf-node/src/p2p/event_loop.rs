@@ -15,13 +15,14 @@ use tokio::sync::mpsc;
 use aya::maps::lpm_trie::Key;
 
 use crate::config::node::{NodeState, NetworkMessage, Transaction, SyncRequest, Vote, SignedVote, SlashingEvent, CHECKPOINT_INTERVAL, get_current_timestamp};
+use ed25519_dalek::Verifier;
 use crate::p2p::behaviour::{MyBehaviour, MyBehaviourEvent};
 use crate::p2p::swarm::GOSSIPSUB_TOPIC;
 use crate::metrics::prometheus::*;
 use crate::config::cli::get_ip_from_multiaddr;
 
-use ed25519_dalek::{VerifyingKey, SIGNATURE_LENGTH, Signer};
-use tracing::{info, warn};
+use ed25519_dalek::{VerifyingKey, SIGNATURE_LENGTH, Signer, Signature};
+use tracing::{info, warn, error};
 
 /// CHANGE 8: Timeout for each consensus round in seconds
 /// If a transaction doesn't receive enough votes within this time, the round is reset
@@ -41,7 +42,16 @@ async fn handle_gossip_message_inner(
     BANDWIDTH_RECEIVED.inc_by(message.data.len() as u64);
     PACKETS_TRACE.with_label_values(&[&sender, "gossip"]).inc();
 
-    if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&message.data) {
+    // P1-3: Try to parse as SignedVote first (new format with Ed25519 verification)
+    if let Ok(signed_vote) = serde_json::from_slice::<SignedVote>(&message.data) {
+        handle_signed_vote(
+            swarm,
+            signed_vote,
+            propagation_source,
+            node_state,
+            topic,
+        ).await;
+    } else if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&message.data) {
         match net_msg {
             NetworkMessage::TxProposal(tx) => {
                 let sender_clone = sender.clone();
@@ -67,6 +77,90 @@ async fn handle_gossip_message_inner(
         }
     } else if message.data.starts_with(b"ATTACK") {
         handle_malicious_message(swarm, ebpf, &sender).await;
+    }
+}
+
+/// P1-3: Handle signed vote with Ed25519 signature verification
+async fn handle_signed_vote(
+    swarm: &mut Swarm<MyBehaviour>,
+    signed_vote: SignedVote,
+    propagation_source: libp2p::PeerId,
+    node_state: &NodeState,
+    topic: &gossipsub::IdentTopic,
+) {
+    let voter_id = signed_vote.vote.voter_id.clone();
+    let tx_id = signed_vote.vote.tx_id.clone();
+
+    tracing::info!(
+        event = "signed_vote_received",
+        tx_id = %tx_id,
+        voter = %voter_id,
+        "Signed Vote Received with Ed25519 signature"
+    );
+
+    // P1-3: Verify Ed25519 signature
+    // Get the verifying key for the voter from peer store
+    // For now, we use a simplified approach: store verifying keys in DB
+    let vk_key = format!("verifying_key:{}", voter_id);
+    
+    let verification_result = (|| -> Result<(), String> {
+        // Retrieve the voter's verifying key from DB
+        let vk_bytes = node_state.db.get(vk_key.as_bytes())
+            .map_err(|e| format!("DB error: {}", e))?
+            .ok_or_else(|| format!("Verifying key not found for voter {}", voter_id))?;
+        
+        if vk_bytes.len() != 32 {
+            return Err("Invalid verifying key size".to_string());
+        }
+        
+        let mut vk_arr = [0u8; 32];
+        vk_arr.copy_from_slice(&vk_bytes[..32]);
+        
+        let verifying_key = VerifyingKey::from_bytes(&vk_arr)
+            .map_err(|e| format!("Invalid verifying key: {}", e))?;
+        
+        // Verify the signature
+        verifying_key.verify_strict(
+            &signed_vote.vote.to_bytes(),
+            &signed_vote.signature
+        ).map_err(|e| {
+            VOTE_VALIDATION_FAILURES.with_label_values(&["invalid_signature"]).inc();
+            format!("Signature verification failed: {}", e)
+        })?;
+        
+        Ok(())
+    })();
+    
+    match verification_result {
+        Ok(()) => {
+            tracing::info!(
+                event = "signature_verified",
+                voter = %voter_id,
+                tx_id = %tx_id,
+                "Ed25519 signature verified successfully"
+            );
+            
+            // Forward to regular vote handling after signature verification
+            handle_vote(
+                swarm,
+                tx_id,
+                voter_id,
+                propagation_source,
+                node_state,
+                topic,
+            ).await;
+        }
+        Err(e) => {
+            warn!(
+                event = "signature_verification_failed",
+                voter = %voter_id,
+                tx_id = %tx_id,
+                error = %e,
+                "Rejected vote: signature verification failed"
+            );
+            TRANSACTIONS_REJECTED.inc();
+            TRANSACTION_FAILURES.inc();
+        }
     }
 }
 
@@ -307,6 +401,9 @@ async fn handle_vote(
         }
         TRANSACTIONS_REJECTED.inc();
         TRANSACTION_FAILURES.inc();
+        // P2-1: Increment double vote detection metric
+        DOUBLE_VOTE_ATTEMPTS.inc();
+        VOTE_VALIDATION_FAILURES.with_label_values(&["duplicate"]).inc();
         return;
     }
 
@@ -332,6 +429,28 @@ async fn handle_vote(
 
             // Dynamic quorum threshold: 2/3 majority with rounding up
             if voters.len() >= quorum_threshold {
+                // P0-1: Measure CONSENSUS_DURATION from timeout marker
+                {
+                    let timeout_key = format!("consensus_timeout:{}", tx_id);
+                    if let Ok(Some(timeout_bytes)) = node_state.db.get(timeout_key.as_bytes()) {
+                        if let Ok(timeout_arr) = <[u8; 8]>::try_from(timeout_bytes.to_vec()) {
+                            let start_timestamp = u64::from_be_bytes(timeout_arr);
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
+                            let duration_ms = (now.saturating_sub(start_timestamp)) * 1000;
+                            CONSENSUS_DURATION.set(duration_ms as i64);
+                            
+                            // P4-1: Record consensus latency histogram
+                            CONSENSUS_LATENCY_MS.with_label_values(&["default", "finality"])
+                                .observe(duration_ms as f64);
+                        }
+                    }
+                    // Clear timeout marker on successful consensus
+                    let _ = node_state.db.delete(timeout_key.as_bytes());
+                }
+                
                 TRANSACTIONS_CONFIRMED.inc();
                 TRANSACTIONS_PROCESSED.inc();
                 
@@ -341,6 +460,7 @@ async fn handle_vote(
                 if let Ok(block) = node_state.create_block(confirmed_txs) {
                     BLOCKS_PROPOSED.inc();
                     CONSENSUS_ROUNDS.inc();
+                    FINALITY_CHECKPOINTS.inc();
                     info!("Block created: height={}, hash={}", block.height, block.hash);
                     
                     // TAREA 2.7: Create checkpoint at intervals
@@ -353,10 +473,6 @@ async fn handle_vote(
                     BLOCKS_PROPOSED.inc();
                     CONSENSUS_ROUNDS.inc();
                 }
-                
-                // Clear timeout marker on successful consensus
-                let timeout_key = format!("consensus_timeout:{}", tx_id);
-                let _ = node_state.db.delete(timeout_key.as_bytes());
                 
                 tracing::info!(
                     event = "quorum_reached",
@@ -434,37 +550,51 @@ pub async fn run(
             _ = stats_interval.tick() => {
                 UPTIME.inc();
                 
-                // Update eBPF XDP metrics
-                if let Some(map) = ebpf.map("LATENCY_STATS") {
-                    if let Ok(latency_stats) = aya::maps::HashMap::<_, u32, u64>::try_from(map) {
-                        let mut total_packets: u64 = 0;
-                        for entry in latency_stats.iter() {
-                            if let Ok((_, count)) = entry {
-                                total_packets = total_packets.saturating_add(count);
-                            }
-                        }
-                        XDP_PACKETS_PROCESSED.set(total_packets as i64);
-                        
+                // P0-1: Update eBPF XDP metrics using maps module
+                {
+                    let mut ebpf_maps = crate::ebpf::maps::EbpfMaps::new(ebpf);
+                    let processed = ebpf_maps.total_packets_processed();
+                    XDP_PACKETS_PROCESSED.set(processed);
+                    
+                    // P0-1: Update XDP_PACKETS_DROPPED from eBPF maps
+                    let dropped = ebpf_maps.dropped_packets_count();
+                    if dropped >= 0 {
+                        XDP_PACKETS_DROPPED.set(dropped);
+                    }
+                    
+                    // Update latency buckets
+                    if let Ok(latency_stats) = ebpf_maps.latency_stats() {
                         for i in 0..64 {
-                            if let Ok(count) = latency_stats.get(&i, 0u64) {
+                            if let Ok(count) = latency_stats.get(&i, 0) {
                                 LATENCY_BUCKETS.with_label_values(&[&i.to_string()]).set(count as i64);
                             }
                         }
                     }
+                    
+                    // Update whitelist/blacklist sizes
+                    if let Ok(bl_size) = ebpf_maps.blacklist_size() {
+                        XDP_BLACKLIST_SIZE.set(bl_size as i64);
+                    }
+                    if let Ok(wl_size) = ebpf_maps.whitelist_size() {
+                        XDP_WHITELIST_SIZE.set(wl_size as i64);
+                    }
                 }
                 
-                // Update whitelist/blacklist sizes
-                if let Some(map) = ebpf.map("NODES_BLACKLIST") {
-                    if let Ok(blacklist) = aya::maps::LpmTrie::<_, u32, u32>::try_from(map) {
-                        let blacklist_size = blacklist.iter().count();
-                        XDP_BLACKLIST_SIZE.set(blacklist_size as i64);
+                // P0-1: Update TRANSACTION_QUEUE_SIZE from pending votes in DB
+                {
+                    let iter = node_state.db.iterator(rocksdb::IteratorMode::Start);
+                    let mut pending_count: i64 = 0;
+                    for item in iter.take(1000) {
+                        if let Ok((key, _)) = item {
+                            if let Ok(key_str) = String::from_utf8(key.to_vec()) {
+                                // Count keys that represent pending consensus rounds
+                                if key_str.starts_with("consensus_timeout:") {
+                                    pending_count += 1;
+                                }
+                            }
+                        }
                     }
-                }
-                if let Some(map) = ebpf.map("NODES_WHITELIST") {
-                    if let Ok(whitelist) = aya::maps::LpmTrie::<_, u32, u32>::try_from(map) {
-                        let whitelist_size = whitelist.iter().count();
-                        XDP_WHITELIST_SIZE.set(whitelist_size as i64);
-                    }
+                    TRANSACTION_QUEUE_SIZE.set(pending_count);
                 }
                 
                 // Update system metrics
@@ -472,6 +602,40 @@ pub async fn run(
                 
                 // Update peer count
                 VALIDATOR_COUNT.set(PEERS_CONNECTED.with_label_values(&["connected"]).get());
+                
+                // P2-2: Eclipse attack detection - periodic check
+                {
+                    let (risk_score, prefixes, peers) = node_state.eclipse_protection.calculate_risk_score();
+                    if risk_score > 70.0 {
+                        tracing::warn!(
+                            event = "eclipse_warning",
+                            risk_score,
+                            unique_prefixes = prefixes,
+                            connected_peers = peers,
+                            "High eclipse attack risk - limited peer diversity detected"
+                        );
+                    }
+                }
+                
+                // P2-3: Update global threat score
+                {
+                    let sybil_attempts = SYBIL_ATTEMPTS_DETECTED.get();
+                    let slashing_count = SLASHING_EVENTS.get();
+                    let replay_rejections = TRANSACTIONS_REPLAY_REJECTED.get();
+                    let blacklist_sz = XDP_BLACKLIST_SIZE.get();
+                    let double_votes = DOUBLE_VOTE_ATTEMPTS.get();
+                    
+                    let threat: f64 = (
+                        (sybil_attempts as f64 * 15.0) +
+                        (slashing_count as f64 * 25.0) +
+                        (replay_rejections as f64 * 10.0) +
+                        ((blacklist_sz as f64) / 10.0) +
+                        (double_votes as f64 * 20.0)
+                    ).min(100.0);
+                    
+                    SECURITY_THREAT_SCORE.with_label_values(&["default"]).set(threat);
+                    BLACKLIST_SIZE.with_label_values(&["default"]).set(blacklist_sz as f64);
+                }
             }
             Some(tx) = rx_rpc.recv() => {
                 tracing::info!(event = "rpc_tx_received", tx_id = %tx.id, data = %tx.data, "Received RPC Transaction");
@@ -516,6 +680,7 @@ pub async fn run(
                             P2P_CONNECTIONS_TOTAL.inc();
                             
                             // SECURITY: Sybil Protection - Register connection with known peer store addresses
+                            // P2-2: Eclipse Protection - Register peer IP for eclipse detection
                             if let Some(addr) = node_state.peer_store.get_peer(peer_id) {
                                 if let Some(ip) = get_ip_from_multiaddr(&addr) {
                                     if let Err(e) = node_state.sybil_protection.register_connection(peer_id, &ip) {
@@ -524,6 +689,11 @@ pub async fn run(
                                     
                                     if let Err(sybil_err) = node_state.sybil_protection.check_ip_limit(peer_id, &ip) {
                                         tracing::warn!(peer_id = %peer_id, ip = %ip, error = %sybil_err, "Sybil protection limit exceeded for peer");
+                                    }
+
+                                    // P2-2: Register with eclipse protection
+                                    if let Err(e) = node_state.eclipse_protection.register_peer(peer_id, &ip.to_string()) {
+                                        tracing::debug!(peer_id = %peer_id, ip = %ip, error = %e, "Failed to register peer for eclipse detection");
                                     }
                                 }
                             }
@@ -534,10 +704,16 @@ pub async fn run(
                             tracing::info!("Decremented PEERS_CONNECTED, incremented P2P_CONNECTIONS_TOTAL. Remaining: {}", num_established);
                             
                             // SECURITY: Unregister connection for Sybil protection tracking
+                            // P2-2: Eclipse Protection - Unregister peer IP
                             if let Some(addr) = node_state.peer_store.get_peer(peer_id) {
                                 if let Some(ip) = get_ip_from_multiaddr(&addr) {
                                     if let Err(e) = node_state.sybil_protection.unregister_connection(peer_id, &ip) {
                                         tracing::debug!(peer_id = %peer_id, ip = %ip, error = %e, "Failed to unregister connection");
+                                    }
+
+                                    // P2-2: Unregister from eclipse protection
+                                    if let Err(e) = node_state.eclipse_protection.unregister_peer(peer_id) {
+                                        tracing::debug!(peer_id = %peer_id, error = %e, "Failed to unregister peer from eclipse detection");
                                     }
                                 }
                             }

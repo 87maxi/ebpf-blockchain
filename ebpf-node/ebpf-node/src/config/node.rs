@@ -6,7 +6,7 @@ use rocksdb::DB;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::security::{peer_store::PeerStore, replay::ReplayProtection, sybil::SybilProtection};
+use crate::security::{eclipse::EclipseProtection, peer_store::PeerStore, replay::ReplayProtection, sybil::SybilProtection};
 
 // Import Digest trait for SHA-256 hashing
 use sha2::Digest;
@@ -211,6 +211,8 @@ pub struct NodeState {
     pub peer_store: PeerStore,
     pub replay_protection: ReplayProtection,
     pub sybil_protection: SybilProtection,
+    // P2-2: Eclipse attack detection
+    pub eclipse_protection: EclipseProtection,
     pub tx_rpc: mpsc::Sender<Transaction>,
     pub tx_ws: broadcast::Sender<String>,
     pub config: NodeConfig,

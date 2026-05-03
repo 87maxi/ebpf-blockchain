@@ -374,6 +374,24 @@ lazy_static! {
         &["message_type"]
     )
     .unwrap();
+
+    // =============================================================================
+    // P2-2: ECLIPSE ATTACK DETECTION METRICS
+    // =============================================================================
+
+    pub static ref ECLIPSE_RISK_SCORE: GaugeVec = register_gauge_vec!(
+        "ebpf_node_eclipse_risk_score",
+        "Eclipse attack risk score (0-100)",
+        &["node_id"]
+    )
+    .unwrap();
+
+    pub static ref PEER_IP_DIVERSITY: GaugeVec = register_gauge_vec!(
+        "ebpf_node_peer_ip_diversity",
+        "Number of unique IP prefixes among connected peers",
+        &["node_id"]
+    )
+    .unwrap();
 }
 
 /// Initialize all metrics
@@ -468,6 +486,12 @@ pub fn initialize_metrics() {
     BANDWIDTH_ABUSE.with_label_values(&["inbound"]).inc_by(0);
     BANDWIDTH_ABUSE.with_label_values(&["outbound"]).inc_by(0);
     MESSAGE_VALIDATION_FAILURES.with_label_values(&["unknown"]).inc_by(0);
+    
+    // =============================================================================
+    // P2-2: ECLIPSE ATTACK DETECTION METRICS
+    // =============================================================================
+    ECLIPSE_RISK_SCORE.with_label_values(&["default"]).set(0.0);
+    PEER_IP_DIVERSITY.with_label_values(&["default"]).set(0.0);
 }
 
 /// Gather all metrics for Prometheus export

@@ -5,6 +5,8 @@ mod api;
 mod p2p;
 mod security;
 mod metrics;
+#[cfg(test)]
+mod tests;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,6 +22,7 @@ use ebpf::hot_reload::EbpfHotReloadManager;
 use metrics::prometheus::{initialize_metrics, PEERS_CONNECTED, PEERS_IDENTIFIED, PEERS_SAVED, BLOCKS_PROPOSED, KPROBE_HIT_COUNT, HOT_RELOAD_SUCCESS_TOTAL, HOT_RELOAD_FAILURE_TOTAL, SWARM_DIAL_ERRORS_TOTAL, ROCKSDB_WRITE_RATE_BYTES_TOTAL, ROCKSDB_DB_SIZE_BYTES, API_REQUEST_DURATION, API_REQUESTS_TOTAL, RINGBUF_BUFFER_UTILIZATION};
 use p2p::behaviour::MyBehaviour;
 use p2p::swarm::{create_swarm, create_gossipsub, setup_listening_and_subscription};
+use security::eclipse::EclipseProtection;
 use security::peer_store::PeerStore;
 use security::replay::ReplayProtection;
 use security::sybil::SybilProtection;
@@ -111,6 +114,8 @@ async fn main() -> anyhow::Result<()> {
     let peer_store = PeerStore::new(db.clone());
     let replay_protection = ReplayProtection::new(db.clone());
     let sybil_protection = SybilProtection::new(db.clone(), 3); // Max 3 connections per IP
+    // P2-2: Eclipse attack detection
+    let eclipse_protection = EclipseProtection::new(db.clone());
     
     // Create gossipsub behaviour
     let gossipsub = create_gossipsub(keypair.clone().into())?;
@@ -321,6 +326,7 @@ async fn main() -> anyhow::Result<()> {
         peer_store: peer_store.clone(),
         replay_protection: replay_protection.clone(),
         sybil_protection: sybil_protection.clone(),
+        eclipse_protection: eclipse_protection.clone(),
         tx_rpc: tx_rpc.clone(),
         tx_ws: tx_ws.clone(),
         config: NodeConfig {
