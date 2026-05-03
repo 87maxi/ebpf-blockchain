@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eBPF Blockchain Monitor</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <h1>
+                    <span class="logo-icon">⛓️</span>
+                    eBPF Blockchain Monitor
+                </h1>
+                <span class="version-badge">v1.0</span>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+                <button id="connectBtn" class="btn btn-primary">Connect</button>
+                <button id="disconnectBtn" class="btn btn-danger" disabled>Disconnect</button>
+            </div>
+        </header>
+
+        <!-- Connection Config Panel -->
+        <div class="config-panel" id="configPanel">
+            <div class="config-field">
+                <label for="nodeUrl">Node WebSocket URL</label>
+                <input type="text" id="nodeUrl" placeholder="ws://192.168.2.13:9090/ws" value="ws://192.168.2.13:9090/ws">
+            </div>
+            <div class="config-field">
+                <label for="apiUrl">Node API URL</label>
+                <input type="text" id="apiUrl" placeholder="http://192.168.2.13:9090" value="http://192.168.2.13:9090">
+            </div>
+        </div>
+
+        <!-- Summary Dashboard -->
+        <div class="dashboard">
+            <div class="stat-card">
+                <div class="stat-icon">📦</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="totalBlocks">0</div>
+                    <div class="stat-label">Total Blocks</div>
+                </div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-icon">🚨</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="suspiciousBlocks">0</div>
+                    <div class="stat-label">Suspicious</div>
+                </div>
+            </div>
+            <div class="stat-card danger">
+                <div class="stat-icon">❌</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="rejectedBlocks">0</div>
+                    <div class="stat-label">Rejected</div>
+                </div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="validatedBlocks">0</div>
+                    <div class="stat-label">Validated</div>
+                </div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="txRate">0</div>
+                    <div class="stat-label">Tx/Second</div>
+                </div>
+            </div>
+            <div class="stat-card neutral">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                    <div class="stat-value" id="latestHeight">0</div>
+                    <div class="stat-label">Latest Height</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters and Search -->
+        <div class="filters-bar">
+            <div class="search-group">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search by hash, proposer, or content...">
+                <button id="searchBtn" class="btn btn-sm">Search</button>
+                <button id="clearSearchBtn" class="btn btn-sm btn-secondary">Clear</button>
+            </div>
+            <div class="filter-group">
+                <select id="statusFilter" class="filter-select">
+                    <option value="all">All Status</option>
+                    <option value="validated">✅ Validated</option>
+                    <option value="pending">⏳ Pending</option>
+                    <option value="rejected">❌ Rejected</option>
+                    <option value="suspicious">🚨 Suspicious</option>
+                </select>
+                <select id="typeFilter" class="filter-select">
+                    <option value="all">All Types</option>
+                    <option value="replay">🔄 Replay Attack</option>
+                    <option value="doublespend">💰 Double Spend</option>
+                    <option value="sybil">👥 Sybil</option>
+                    <option value="ddos">💣 DDoS</option>
+                </select>
+                <select id="timeFilter" class="filter-select">
+                    <option value="all">All Time</option>
+                    <option value="60">Last 1 minute</option>
+                    <option value="300">Last 5 minutes</option>
+                    <option value="900">Last 15 minutes</option>
+                    <option value="3600">Last 1 hour</option>
+                </select>
+                <button id="applyFiltersBtn" class="btn btn-sm btn-primary">Apply Filters</button>
+            </div>
+        </div>
+
+        <!-- Blocks Table -->
+        <div class="table-container">
+            <table class="blocks-table" id="blocksTable">
+                <thead>
+                    <tr>
+                        <th class="col-status">Status</th>
+                        <th class="col-time">Timestamp</th>
+                        <th class="col-height">Height</th>
+                        <th class="col-hash">Hash</th>
+                        <th class="col-proposer">Proposer</th>
+                        <th class="col-tx">Tx Count</th>
+                        <th class="col-flags">Flags</th>
+                        <th class="col-actions">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="blocksTableBody">
+                    <tr class="empty-row">
+                        <td colspan="8">
+                            <div class="empty-state">
+                                <span class="empty-icon">📭</span>
+                                <p>No blocks yet. Connect to a node to start monitoring.</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Event Log -->
+        <div class="event-log-container">
+            <div class="event-log-header">
+                <h3>Event Log</h3>
+                <button id="clearLogBtn" class="btn btn-sm btn-secondary">Clear Log</button>
+            </div>
+            <div class="event-log" id="eventLog"></div>
+        </div>
+
+        <!-- Block Detail Modal -->
+        <div class="modal-overlay" id="blockDetailModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 id="modalTitle">Block Details</h2>
+                    <button class="modal-close" id="modalClose">&times;</button>
+                </div>
+                <div class="modal-body" id="modalBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/websocket.js"></script>
+    <script src="js/filters.js"></script>
+    <script src="js/table.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
