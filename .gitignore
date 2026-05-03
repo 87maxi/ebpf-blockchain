@@ -1,4 +1,6 @@
+# Data directories
 data/
+logs/
 
 # Python build artifacts
 __pycache__/
@@ -13,3 +15,15 @@ env/
 .venv/
 .eggs
 *.egg
+
+# Rust build artifacts
+ebpf-node/target/
+ebpf-node/ebpf-node/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
